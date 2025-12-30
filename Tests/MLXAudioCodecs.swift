@@ -5,12 +5,6 @@
 //  Created by Ben Harraway on 14/04/2025.
 //
 
-// Run with:  xcodebuild test \
-// -scheme MLXAudio-Package \
-// -destination 'platform=macOS' \
-// -only-testing:MLXAudioTests/SNACTests
-//  2>&1 | grep -E "(Test (testSNAC|Suite|run)|Loaded audio|Loading SNAC|SNAC model loaded|Audio input shape|Encoding|Encoded to|Decoding|Rec
-
 
 
 import Testing
@@ -21,6 +15,14 @@ import Foundation
 
 @testable import MLXAudioTTS
 @testable import MLXAudioCodecs
+
+
+// Run with:  xcodebuild test \
+// -scheme MLXAudio-Package \
+// -destination 'platform=macOS' \
+// -only-testing:MLXAudioTests/SNACTests
+//  2>&1 | grep -E "(Test (testSNAC|Suite|run)|Loaded audio|Loading SNAC|SNAC model loaded|Audio input shape|Encoding|Encoded to|Decoding|Rec
+
 
 struct SNACTests {
 
@@ -63,25 +65,4 @@ struct SNACTests {
     }
 }
 
-//struct MLXAudioTests {
-//
-//    func example() async throws {
-//        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-//    }
-//
-//
-//    func testViewBodyDoesNotCrash() {
-//        _ = ContentView().body
-//    }
-//
-//
-//    func testKokoro() async {
-//        let kokoroTTSModel = KokoroTTSModel()
-//        kokoroTTSModel.say("test", .bmGeorge)
-//    }
-//
-//    func testOrpheus() async {
-//        let orpheusTTSModel = OrpheusTTSModel()
-//        await orpheusTTSModel.say("test", .tara)
-//    }
-//}
+
