@@ -21,7 +21,7 @@
     {
       "identity" : "mlx-swift-lm",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift-lm.git",
+      "location" : "https://github.com/Blaizzy/mlx-swift-lm.git",
       "state" : {
         "branch" : "main",
         "revision" : "d9f46e3a1fe715d01304372089aba5f39c585327"
@@ -57,10 +57,10 @@
     {
       "identity" : "swift-huggingface",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/huggingface/swift-huggingface.git",
+      "location" : "https://github.com/Blaizzy/swift-huggingface.git",
       "state" : {
-        "revision" : "49abc5179471f799b1d690790521a13cb5cffa64",
-        "version" : "0.5.0"
+        "branch" : "main",
+        "revision" : "66b1ce0567aa70afc5b74520875bbc64d1e96702"
       }
     },
     {
