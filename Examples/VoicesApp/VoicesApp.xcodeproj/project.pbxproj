@@ -7,8 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		83B551642F080541004A8FA5 /* MLXAudioTTS in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* MLXAudioTTS */; };
-		83B551652F080541004A8FA5 /* MLXAudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = PKG002 /* MLXAudioCore */; };
+		33B121622F2EA502006A1A8A /* MLXAudioTTS in Frameworks */ = {isa = PBXBuildFile; productRef = PKG001 /* MLXAudioTTS */; };
+		33B121632F2EA502006A1A8A /* MLXAudioCore in Frameworks */ = {isa = PBXBuildFile; productRef = PKG002 /* MLXAudioCore */; };
 		APP001 /* VoicesApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC001 /* VoicesApp.swift */; };
 		APP002 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC002 /* ContentView.swift */; };
 		APP003 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = SRC003 /* Voice.swift */; };
@@ -38,8 +38,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				83B551652F080541004A8FA5 /* MLXAudioCore in Frameworks */,
-				83B551642F080541004A8FA5 /* MLXAudioTTS in Frameworks */,
+				33B121632F2EA502006A1A8A /* MLXAudioCore in Frameworks */,
+				33B121622F2EA502006A1A8A /* MLXAudioTTS in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -127,8 +127,8 @@
 			);
 			name = VoicesApp;
 			packageProductDependencies = (
-				PKG001 /* MLXAudioTTS */,
-				PKG002 /* MLXAudioCore */,
+				33B1215C2F2EA41E006A1A8A /* MLXAudioCore */,
+				33B1215E2F2EA41E006A1A8A /* MLXAudioTTS */,
 			);
 			productName = VoicesApp;
 			productReference = PROD001 /* VoicesApp.app */;
@@ -159,7 +159,7 @@
 			);
 			mainGroup = GRP001;
 			packageReferences = (
-				PKG003 /* XCLocalSwiftPackageReference "../.." */,
+				33B121592F2EA41E006A1A8A /* XCLocalSwiftPackageReference "../.." */,
 			);
 			productRefGroup = GRP006 /* Products */;
 			projectDirPath = "";
@@ -348,20 +348,20 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		PKG003 /* XCLocalSwiftPackageReference "../.." */ = {
+		33B121592F2EA41E006A1A8A /* XCLocalSwiftPackageReference "../.." */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../..;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		PKG001 /* MLXAudioTTS */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = MLXAudioTTS;
-		};
-		PKG002 /* MLXAudioCore */ = {
+		33B1215C2F2EA41E006A1A8A /* MLXAudioCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MLXAudioCore;
+		};
+		33B1215E2F2EA41E006A1A8A /* MLXAudioTTS */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MLXAudioTTS;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
