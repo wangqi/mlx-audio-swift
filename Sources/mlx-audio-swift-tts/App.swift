@@ -37,7 +37,10 @@ enum App {
                 model: args.model,
                 text: args.text,
                 voice: args.voice,
-                outputPath: args.outputPath
+                outputPath: args.outputPath,
+                maxTokens: args.maxTokens,
+                temperature: args.temperature,
+                topP: args.topP
             )
         } catch {
             fputs("Error: \(error)\n", stderr)
@@ -51,6 +54,9 @@ enum App {
         text: String,
         voice: String?,
         outputPath: String?,
+        maxTokens: Int,
+        temperature: Float,
+        topP: Float,
         hfToken: String? = nil
     ) async throws {
         Memory.cacheLimit = 100 * 1024 * 1024
@@ -81,7 +87,11 @@ enum App {
             refAudio: nil,
             refText: nil,
             language: nil,
-            generationParameters: GenerateParameters()
+            generationParameters: GenerateParameters(
+                maxTokens: maxTokens,
+                temperature: temperature,
+                topP: topP
+            )
         ).asArray(Float.self)
 
         let outputURL = makeOutputURL(outputPath: outputPath)
@@ -128,11 +138,13 @@ enum App {
 enum CLIError: Error, CustomStringConvertible {
     case missingValue(String)
     case unknownOption(String)
+    case invalidValue(String, String)
 
     var description: String {
         switch self {
         case .missingValue(let k): "Missing value for \(k)"
         case .unknownOption(let k): "Unknown option \(k)"
+        case .invalidValue(let k, let v): "Invalid value for \(k): \(v)"
         }
     }
 }
@@ -142,12 +154,18 @@ struct CLI {
     let text: String
     let voice: String?
     let outputPath: String?
+    let maxTokens: Int
+    let temperature: Float
+    let topP: Float
 
     static func parse() throws -> CLI {
         var text: String?
         var voice: String? = nil
         var outputPath: String? = nil
         var model = "mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit"
+        var maxTokens: Int = 1200
+        var temperature: Float = 0.7
+        var topP: Float = 0.9
 
         var it = CommandLine.arguments.dropFirst().makeIterator()
         while let arg = it.next() {
@@ -164,6 +182,18 @@ struct CLI {
             case "--output", "-o":
                 guard let v = it.next() else { throw CLIError.missingValue(arg) }
                 outputPath = v
+            case "--max_tokens":
+                guard let v = it.next() else { throw CLIError.missingValue(arg) }
+                guard let value = Int(v) else { throw CLIError.invalidValue(arg, v) }
+                maxTokens = value
+            case "--temperature":
+                guard let v = it.next() else { throw CLIError.missingValue(arg) }
+                guard let value = Float(v) else { throw CLIError.invalidValue(arg, v) }
+                temperature = value
+            case "--top_p":
+                guard let v = it.next() else { throw CLIError.missingValue(arg) }
+                guard let value = Float(v) else { throw CLIError.invalidValue(arg, v) }
+                topP = value
             case "--help", "-h":
                 printUsage()
                 exit(0)
@@ -180,20 +210,31 @@ struct CLI {
             throw CLIError.missingValue("--text")
         }
 
-        return CLI(model: model, text: finalText, voice: voice, outputPath: outputPath)
+        return CLI(
+            model: model,
+            text: finalText,
+            voice: voice,
+            outputPath: outputPath,
+            maxTokens: maxTokens,
+            temperature: temperature,
+            topP: topP
+        )
     }
 
     static func printUsage() {
         let exe = (CommandLine.arguments.first as NSString?)?.lastPathComponent ?? "marvis-tts-cli"
         print("""
         Usage:
-          \(exe) --text "Hello world" [--voice conversational_b] [--model <hf-repo>] [--output <path>]
+          \(exe) --text "Hello world" [--voice conversational_b] [--model <hf-repo>] [--output <path>] [--max_tokens <int>] [--temperature <float>] [--top_p <float>]
 
         Options:
           -t, --text <string>           Text to synthesize (required if not passed as trailing arg)
           -v, --voice <name>            Voice id
               --model <repo>            HF repo id. Default: mlx-community/Qwen3-TTS-12Hz-0.6B-Base-8bit
           -o, --output <path>           Output WAV path. Default: ./output.wav
+              --max_tokens <int>       Maximum number of tokens to generate. Default: 1200
+              --temperature <float>    Sampling temperature. Default: 0.7
+              --top_p <float>          Top-p sampling. Default: 0.9
           -h, --help                    Show this help
         """)
     }
