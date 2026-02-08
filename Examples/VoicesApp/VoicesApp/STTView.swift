@@ -35,17 +35,11 @@ struct STTView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        HStack(alignment: .lastTextBaseline, spacing: 0) {
-                            Text(viewModel.transcriptionText)
-                                .font(bodyFont)
-                                .textSelection(.enabled)
-
-                            if viewModel.isGenerating {
-                                BlinkingCursor()
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
+                        Text(viewModel.transcriptionText)
+                            .font(bodyFont)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
 
                         Color.clear
                             .frame(height: 1)
@@ -255,22 +249,6 @@ struct STTView: View {
 
     private var canTranscribe: Bool {
         viewModel.selectedAudioURL != nil && !viewModel.isGenerating && viewModel.isModelLoaded
-    }
-}
-
-private struct BlinkingCursor: View {
-    @State private var visible = true
-
-    var body: some View {
-        Rectangle()
-            .fill(Color.accentColor)
-            .frame(width: 2, height: 18)
-            .opacity(visible ? 1 : 0)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                    visible = false
-                }
-            }
     }
 }
 
