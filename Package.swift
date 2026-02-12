@@ -35,6 +35,7 @@ let package = Package(
             name: "mlx-audio-swift-tts",
             targets: ["mlx-audio-swift-tts"],
         ),
+
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.3")),
@@ -123,6 +124,10 @@ let package = Package(
                 "MLXAudioTTS",
                 "MLXAudioSTT",
                 .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "MLXNN", package: "mlx-swift"),
+                .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
             path: "Sources/MLXAudioSTS"
         ),
