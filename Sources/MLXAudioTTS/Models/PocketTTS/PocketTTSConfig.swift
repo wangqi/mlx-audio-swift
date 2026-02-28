@@ -135,6 +135,16 @@ public struct PocketTTSMimiConfig: Codable {
     }
 }
 
+public struct PocketTTSWeightQuantizationConfig: Codable {
+    public let groupSize: Int
+    public let bits: Int
+
+    enum CodingKeys: String, CodingKey {
+        case groupSize = "group_size"
+        case bits
+    }
+}
+
 public struct PocketTTSModelConfig: Codable {
     public let modelType: String
     public let flowLM: PocketTTSFlowLMConfig
@@ -142,6 +152,7 @@ public struct PocketTTSModelConfig: Codable {
     public let weightsPath: String?
     public let weightsPathWithoutVoiceCloning: String?
     public let modelPath: String?
+    public let quantization: PocketTTSWeightQuantizationConfig?
 
     enum CodingKeys: String, CodingKey {
         case modelType = "model_type"
@@ -150,6 +161,7 @@ public struct PocketTTSModelConfig: Codable {
         case weightsPath = "weights_path"
         case weightsPathWithoutVoiceCloning = "weights_path_without_voice_cloning"
         case modelPath = "model_path"
+        case quantization
     }
 
     public static func load(from url: URL) throws -> PocketTTSModelConfig {
