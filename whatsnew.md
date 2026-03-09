@@ -1,169 +1,87 @@
-# MLX-Audio-Swift Update: tag-20260224 → tag-20260302
+# mlx-audio-swift Upgrade: tag-20260302 to tag-20260309
 
-**Update Date:** March 2, 2026
-**Previous Version:** tag-20260224
-**Current Version:** tag-20260302
-**New Commits (upstream):** 2 functional commits
+## Summary
 
----
-
-## Executive Summary
-
-This is a **low-risk maintenance update** with two focused improvements: a unified MLX-native audio resampling API that eliminates AVFoundation dependency, and a more robust model download validation system that prevents silent failures from incomplete or corrupted downloads.
-
-### Risk Assessment: **LOW** (1/5)
-
-| Risk Area | Level | Reason |
-|-----------|-------|--------|
-| MLXArray resampling overload | **LOW** | Additive API; existing `[Float]` variant unchanged |
-| AVFoundation removal from tool apps | **LOW** | Only CLI tool binaries affected, not the library |
-| Download validation & cache clearing | **LOW** | More defensive; adds failure path that was previously silent |
-| New `ModelUtilsError` type | **LOW** | Additive; only callers that do not handle the new error are affected |
-| API breaking changes | **NONE** | No existing public API removed or changed |
+This upgrade merges 5 upstream commits (excluding merge commits) from the Blaizzy/mlx-audio-swift main branch, covering two main areas: Qwen3 TTS performance improvements, Parakeet V2 accuracy fixes, and a major new feature — MLXAudioLID (Language Identification).
 
 ---
 
-## Commits Included
+## New Features
 
-| Commit | Author | Date | Description |
-|--------|--------|------|-------------|
-| `1e49dcf` | Prince Canuma | 2026-02-25 | Enhance model download validation and cache management in ModelUtils (#76) |
-| `b76c81f` | Lucas Newman | 2026-02-25 | Add an MLXArray-based audio resampling variant (#77) |
+### MLXAudioLID: Spoken Language Identification Module (#80)
 
----
+A new `MLXAudioLID` Swift Package Manager module has been added, implementing Wav2Vec2-based language identification supporting 256 languages (MMS-LID-256 by Facebook).
 
-## Change Details
+**Architecture:**
+- Full Wav2Vec2 backbone: 7-layer feature extractor, feature projection, positional conv embedding, 48 transformer encoder layers
+- Custom attention with HuggingFace-compatible key names
+- Auto-normalization (zero-mean, unit-variance) in `predict()`
+- Weight norm precomputed in `sanitize()` for efficiency
 
-### 1. MLXArray-Based Audio Resampling API (#77)
+**Second model: ECAPA-TDNN (VoxLingua107)**
+- Supports 107 languages via SpeechBrain ECAPA-TDNN architecture
+- ~16x faster and ~47x smaller than MMS-LID-256
+- GPU-accelerated mel spectrogram (Hamming, HTK, top_db=80)
+- Includes TDNNBlock, Res2NetBlock, SEBlock, SERes2NetBlock, ASP layers
 
-**Files changed:**
-- `Sources/MLXAudioCore/AudioUtils.swift` (+15 lines)
-- `Sources/Tools/mlx-audio-swift-sts/App.swift` (-68 lines)
-- `Sources/Tools/mlx-audio-swift-stt/App.swift` (-84 lines)
-- `Sources/Tools/mlx-audio-swift-tts/App.swift` (-14 / +5 lines)
-- `Tests/MLXAudioSmokeTests.swift` (minor update)
+**Implementation details:**
+- Shared ECAPA-TDNN backbone extracted to codec module for reuse
+- LID CLI demo tool added
+- 35+ unit tests across both models
+- Integration tests gated behind `MLXAUDIO_ENABLE_NETWORK_TESTS` env var
 
-**What changed:**
+### VoicesApp: Speech-to-Speech (STS) View (#78)
 
-A new `resampleAudio(_:from:to:)` overload has been added to `MLXAudioCore.AudioUtils`:
-
-```swift
-/// Resample audio to a target sample rate.
-public func resampleAudio(
-    _ samples: MLXArray,
-    from sourceSampleRate: Int,
-    to targetSampleRate: Int
-) throws -> MLXArray
-```
-
-This variant accepts and returns `MLXArray` directly, wrapping the existing `[Float]` implementation with a zero-copy bridge. Previously each tool app (STS, STT, TTS) had its own private copy of `AVAudioConverter`-based resampling code (~80–95 lines each), duplicated three times. All three tool apps now call `MLXAudioCore.resampleAudio()` instead.
-
-**What was removed:**
-- Private `resampleAudio(_:from:to:)` implementations using `AVAudioConverter` from all three tool apps
-- `AppError.audioResampleFailed` error case from STS and STT tool apps
-- `@preconcurrency import AVFoundation` from the STT tool app
-
-**Net result:** ~180 lines deleted across tool apps, 15 lines added to the shared library. The public library surface gains a more ergonomic `MLXArray → MLXArray` resampling path.
-
-**iOS Device Impact:**
-- The library-level change (`AudioUtils.swift`) is purely additive — existing callers are unaffected
-- Tool app changes are CLI-only, not shipped on device
-- The new `MLXArray`-based overload avoids manual `asArray(Float.self)` / `MLXArray(...)` round-trips, reducing intermediate allocations when resampling audio in hot paths
-
-**Risk Level: LOW** — additive API; all existing call sites unchanged
+A new STS (Speech-to-Speech) view added to the VoicesApp demo application. This is a demo/example app change only; no production library API was altered.
 
 ---
 
-### 2. Model Download Validation and Cache Management (#76)
+## Bug Fixes
 
-**File changed:** `Sources/MLXAudioCore/ModelUtils.swift` (+38 lines, -2 lines)
+### Parakeet V2 Mel Scale Fix (#86)
 
-**What changed:**
+**Problem:** Parakeet V2 (and V3) models were trained with NeMo's `AudioToMelSpectrogramPreprocessor` using the HTK mel scale, but the library was using the Slaney scale, causing accuracy degradation.
 
-**Before:** When a model download was interrupted or produced zero-byte weight files, `ModelUtils` silently left the corrupted directory in place. On the next launch the app would attempt to load the broken model and fail with a cryptic error.
+**Fix:**
+- Changed mel filter scale from `.slaney` to `.htk` for Parakeet models
+- Added `eval(jointOut)` calls in both TDT and standard RNN-T decode paths to ensure joint network output is materialized before argmax
+- Added `parakeet-tdt-0.6b-v2` to the supported models list
 
-**After:** Three improvements:
-
-#### a) Post-download validation
-After `Hub.snapshot()` completes, the code now verifies that at least one file with the required extension (e.g. `.safetensors`, `.npz`) exists and has a non-zero file size. If not, the cache is cleared and `ModelUtilsError.incompleteDownload` is thrown.
-
-#### b) Atomic dual-directory cache clearing
-The new private `clearCaches(modelDir:repoID:hubCache:)` helper removes both the model directory **and** the Hub metadata cache directory together. Previously only the model directory was deleted, leaving stale Hub metadata that could prevent a clean re-download.
-
-#### c) User-friendly error type
-New public `ModelUtilsError.incompleteDownload` error with a clear English message:
-
-```
-"Downloaded model 'repo/name' has missing or zero-byte weight files.
- The cache has been cleared — please try again."
-```
-
-**iOS Device Impact:**
-- On-device model downloads now self-heal: a failed or interrupted download clears its own broken cache automatically
-- Users see a meaningful error message instead of a cryptic Swift runtime crash
-- Eliminates the previous failure mode where users had to manually clear app data to recover from a bad download
-- Particularly impactful on iOS where network interruptions during large model downloads (1–8 GB) are common
-
-**Risk Level: LOW** — defensive improvement; the only new failure path covers downloads that were already silently broken
+**Impact:** This is a correctness fix. Transcription accuracy for Parakeet V2 models improves significantly. Models already in production were producing slightly incorrect outputs.
 
 ---
 
-## Files Changed Summary
+## Performance Improvements
 
-| File | Change Type | Net Lines |
-|------|-------------|-----------|
-| `Sources/MLXAudioCore/AudioUtils.swift` | New API | +15 |
-| `Sources/MLXAudioCore/ModelUtils.swift` | Enhancement | +38 / -2 |
-| `Sources/Tools/mlx-audio-swift-sts/App.swift` | Refactor (tool only) | -68 |
-| `Sources/Tools/mlx-audio-swift-stt/App.swift` | Refactor (tool only) | -84 |
-| `Sources/Tools/mlx-audio-swift-tts/App.swift` | Refactor (tool only) | -9 |
-| `Tests/MLXAudioSmokeTests.swift` | Minor update | ±4 |
+### Qwen3 TTS Performance (#81, #82)
 
-**Total:** 6 files changed, ~53 insertions, ~165 deletions (net -112 lines)
+Two successive rounds of performance improvements for Qwen3 TTS:
+- Reduced latency and improved throughput for Qwen3 TTS inference on Apple Silicon
+- RTF reporting changed from RTF (Real-Time Factor) to RTFx (inverse, higher = faster) for clearer benchmarking
+
+**Impact:** Qwen3 TTS generation speed improves on iPhone and Mac. Both PRs target the Qwen3 TTS generation pipeline with internal optimizations.
 
 ---
 
-## iOS Device Impact Summary
+## Risk Assessment
 
-| Change | iOS Benefit | Action Required |
-|--------|-------------|-----------------|
-| MLXArray resampling overload | Avoids `[Float]` round-trips in hot paths | None (additive API) |
-| Post-download validation | Detects zero-byte weight files immediately after download | None |
-| Dual-directory cache clearing | Prevents stale Hub metadata after failed download | None |
-| `ModelUtilsError.incompleteDownload` | User-visible error instead of silent crash | Consider surfacing in download UI |
+| Area | Risk Level | Notes |
+|------|-----------|-------|
+| Qwen3 TTS performance changes | **Low** | Internal optimization only; outputs should be identical |
+| Parakeet V2 mel scale fix | **Medium** | Correct fix, but existing users may notice transcription output differences |
+| MLXAudioLID new module | **Low** | Additive new module; no existing API changed |
+| ECAPA-TDNN shared backbone extraction | **Low** | Refactor of codec module; existing codec behavior unchanged |
+| VoicesApp STS view | **None** | Demo app only |
 
----
+### Key Considerations for iOS
 
-## Our Integration — Action Items
-
-### Required: **NONE**
-
-This is a drop-in replacement. No code changes required in AIAssistant.
-
-### Recommended — Surface Download Error
-
-`ModelUtilsError.incompleteDownload` is now thrown where previously a silent failure occurred. If AIAssistant catches errors from `ModelUtils.loadModel()` or the download path, consider adding a case for this new error to show users a "Download was incomplete — please retry" message.
+1. **MLXAudioLID is not yet integrated** into the main app. Adding LID support will require new model download flows and UI. The MMS-LID-256 model is ~3.9GB — not suitable for default download; ECAPA-TDNN (~80MB) is the practical option for on-device use.
+2. **Parakeet V2 mel scale fix**: If any users have been using Parakeet V2 for ASR, they may notice improved (but different) transcriptions after upgrade. This is expected and correct behavior.
+3. **Qwen3 TTS changes**: No API-level changes. App-level integration is unaffected; users benefit from faster generation automatically.
+4. **No breaking API changes** detected across all 5 commits. Existing integrations for TTS, ASR, VAD, Diarization, STS remain unchanged.
 
 ---
 
-## Testing Checklist
+## Upgrade Recommendation
 
-- [ ] Project builds successfully with updated submodule
-- [ ] MLX Audio TTS generation works (basic speech synthesis)
-- [ ] MLX Audio STT transcription works (basic transcription)
-- [ ] Model download from HuggingFace completes successfully
-- [ ] (Optional) Simulate interrupted download — verify cache is cleared and error message appears
-- [ ] No runtime warnings or crashes
-
----
-
-## Overall Risk Rating
-
-**LOW — safe to upgrade**
-
-Both changes are defensive improvements: one adds a more ergonomic `MLXArray`-based resampling overload (purely additive), the other makes download failure handling more robust. No model architectures changed, no inference code changed, no public API removed.
-
----
-
-**Generated:** 2026-03-02
-**Covers commits:** 2 upstream functional commits (tag-20260224 → tag-20260302)
+**Proceed with upgrade.** All changes are either additive (LID module) or corrective (Parakeet mel scale, Qwen3 performance). No breaking changes to existing APIs. The Parakeet mel scale fix is the most impactful correctness improvement and should be rolled out to users as soon as possible.
