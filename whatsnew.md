@@ -1,87 +1,100 @@
-# mlx-audio-swift Upgrade: tag-20260302 to tag-20260309
+# mlx-audio-swift Upgrade Notes: tag-20260309 to tag-20260315
 
-## Summary
+## Commits Included
 
-This upgrade merges 5 upstream commits (excluding merge commits) from the Blaizzy/mlx-audio-swift main branch, covering two main areas: Qwen3 TTS performance improvements, Parakeet V2 accuracy fixes, and a major new feature — MLXAudioLID (Language Identification).
+| Hash | Title |
+|------|-------|
+| cae5593 | Fix window chunking for Qwen3 ASR (#92) |
+| fcbd04d | Add Granite Speech 4 (#95) |
+| 035f0e0 | Fill in some missing codecs (#96) |
+| 8fb5fdf | Add Echo TTS (#97) |
+| 00432632 | Add FireRed ASR 2 (#98) |
+| db2635b | Add SenseVoice (#99) |
 
 ---
 
 ## New Features
 
-### MLXAudioLID: Spoken Language Identification Module (#80)
+### New STT Models
 
-A new `MLXAudioLID` Swift Package Manager module has been added, implementing Wav2Vec2-based language identification supporting 256 languages (MMS-LID-256 by Facebook).
+**SenseVoice** (db2635b)
+- Multi-language speech recognition from Alibaba/FunASR
+- Supports emotion recognition tags (`HAPPY`, `SAD`, etc.) and acoustic event detection
+- 50+ language support including Chinese, English, Japanese, Korean, Cantonese
+- Uses a custom SenseVoice tokenizer backed by the refactored `UnigramTokenizer` in `MLXAudioCore`
+- model_type: `"sensevoice"`
 
-**Architecture:**
-- Full Wav2Vec2 backbone: 7-layer feature extractor, feature projection, positional conv embedding, 48 transformer encoder layers
-- Custom attention with HuggingFace-compatible key names
-- Auto-normalization (zero-mean, unit-variance) in `predict()`
-- Weight norm precomputed in `sanitize()` for efficiency
+**FireRed ASR 2** (00432632)
+- Hybrid attention-based ASR from FireRed AI, optimized for Mandarin and English
+- Transformer encoder with CTC decoder; custom tokenizer with SentencePiece
+- model_type: `"fireredasr2"`
 
-**Second model: ECAPA-TDNN (VoxLingua107)**
-- Supports 107 languages via SpeechBrain ECAPA-TDNN architecture
-- ~16x faster and ~47x smaller than MMS-LID-256
-- GPU-accelerated mel spectrogram (Hamming, HTK, top_db=80)
-- Includes TDNNBlock, Res2NetBlock, SEBlock, SERes2NetBlock, ASP layers
+**IBM Granite Speech 4** (fcbd04d)
+- IBM Research speech model combining a WhisperEncoder audio backbone with a Granite language model
+- End-to-end encoder-decoder architecture with cross-attention projection
+- model_type: `"granite_speech"` / `"granite"`
 
-**Implementation details:**
-- Shared ECAPA-TDNN backbone extracted to codec module for reuse
-- LID CLI demo tool added
-- 35+ unit tests across both models
-- Integration tests gated behind `MLXAUDIO_ENABLE_NETWORK_TESTS` env var
+### New TTS Models
 
-### VoicesApp: Speech-to-Speech (STS) View (#78)
+**Echo TTS** (8fb5fdf)
+- DiT (Diffusion Transformer) based TTS model
+- Uses FishS1DAC as the audio codec (newly added this cycle)
+- Flow-matching generation with configurable diffusion steps
+- Already registered in `TTS.loadModel()` factory under types `"echo_tts"` / `"echo"`
+- model_type: `"echo_tts"`
 
-A new STS (Speech-to-Speech) view added to the VoicesApp demo application. This is a demo/example app change only; no production library API was altered.
+### New Audio Codecs (035f0e0)
+
+**BigVGAN** - NVIDIA neural vocoder; mel-spectrogram to waveform via multi-period discriminator
+
+**Descript DAC** - High-fidelity general-purpose audio tokenizer using Residual Vector Quantization (RVQ)
+
+**FishS1DAC** - FishAudio S1 dual-codebook codec used by Echo TTS; dual-stream Mamba + Transformer decoder
 
 ---
 
 ## Bug Fixes
 
-### Parakeet V2 Mel Scale Fix (#86)
-
-**Problem:** Parakeet V2 (and V3) models were trained with NeMo's `AudioToMelSpectrogramPreprocessor` using the HTK mel scale, but the library was using the Slaney scale, causing accuracy degradation.
-
-**Fix:**
-- Changed mel filter scale from `.slaney` to `.htk` for Parakeet models
-- Added `eval(jointOut)` calls in both TDT and standard RNN-T decode paths to ensure joint network output is materialized before argmax
-- Added `parakeet-tdt-0.6b-v2` to the supported models list
-
-**Impact:** This is a correctness fix. Transcription accuracy for Parakeet V2 models improves significantly. Models already in production were producing slightly incorrect outputs.
+**Qwen3 ASR window chunking** (cae5593)
+- Fixed a variable scope bug: loop windows were appended with undefined index `i` instead of `windowIndex`
+- For long audio with multiple transcript windows, this caused incorrect window ordering after sort, producing garbled output
+- Added unit tests covering multi-window scenarios
 
 ---
 
-## Performance Improvements
+## Refactoring
 
-### Qwen3 TTS Performance (#81, #82)
-
-Two successive rounds of performance improvements for Qwen3 TTS:
-- Reduced latency and improved throughput for Qwen3 TTS inference on Apple Silicon
-- RTF reporting changed from RTF (Real-Time Factor) to RTFx (inverse, higher = faster) for clearer benchmarking
-
-**Impact:** Qwen3 TTS generation speed improves on iPhone and Mac. Both PRs target the Qwen3 TTS generation pipeline with internal optimizations.
+**UnigramTokenizer moved to MLXAudioCore** (db2635b)
+- `UnigramTokenizer` and its protobuf parser (`SentencePieceModelParser`, `SentencePieceProtobufReader`) moved from `MLXAudioTTS/Models/PocketTTS/` to `MLXAudioCore`
+- `PocketTTSConditioners` now calls `UnigramTokenizer(sentencePieceModelData:)` instead of the previously local custom parser
+- New convenience initializers: `init(sentencePieceModelData:)`, `init(tokenizerJSONData:)`, plus static factories `from(tokenizerJSONURL:)` and `from(sentencePieceModelURL:)`
+- **Conflict resolved in our fork**: The custom `parseSentencePieceProto` method in `SentencePieceTokenizer` was removed in favour of the upstream `UnigramTokenizer(sentencePieceModelData:)` which delegates to the rewritten `SentencePieceModelParser`
 
 ---
 
-## Risk Assessment
+## iOS Compatibility Assessment
 
-| Area | Risk Level | Notes |
-|------|-----------|-------|
-| Qwen3 TTS performance changes | **Low** | Internal optimization only; outputs should be identical |
-| Parakeet V2 mel scale fix | **Medium** | Correct fix, but existing users may notice transcription output differences |
-| MLXAudioLID new module | **Low** | Additive new module; no existing API changed |
-| ECAPA-TDNN shared backbone extraction | **Low** | Refactor of codec module; existing codec behavior unchanged |
-| VoicesApp STS view | **None** | Demo app only |
+| Feature | iOS Risk | Notes |
+|---------|----------|-------|
+| Qwen3 ASR window fix | Low | Pure logic fix; no API changes |
+| SenseVoice STT | Low | Pure Swift + MLX; no platform APIs |
+| FireRed ASR 2 | Low | Pure Swift + MLX; SentencePiece binary tokenizer |
+| Granite Speech 4 | Low | Pure Swift + MLX; dual-encoder cross-attention |
+| Echo TTS | Low-Medium | FishS1DAC codec is new and memory-intensive |
+| BigVGAN / Descript DAC | Low | Pure Swift + MLX; not used by any default model yet |
+| FishS1DAC codec | Low-Medium | Mamba layers; may be demanding on older devices |
+| UnigramTokenizer refactor | Low | Conflict resolved correctly; upstream parser is equivalent |
 
-### Key Considerations for iOS
-
-1. **MLXAudioLID is not yet integrated** into the main app. Adding LID support will require new model download flows and UI. The MMS-LID-256 model is ~3.9GB — not suitable for default download; ECAPA-TDNN (~80MB) is the practical option for on-device use.
-2. **Parakeet V2 mel scale fix**: If any users have been using Parakeet V2 for ASR, they may notice improved (but different) transcriptions after upgrade. This is expected and correct behavior.
-3. **Qwen3 TTS changes**: No API-level changes. App-level integration is unaffected; users benefit from faster generation automatically.
-4. **No breaking API changes** detected across all 5 commits. Existing integrations for TTS, ASR, VAD, Diarization, STS remain unchanged.
+**Overall risk: Low**
+- All changes are pure Swift/MLX with no platform-specific APIs
+- No changes to audio I/O, AVFoundation, or CoreML paths
+- Echo TTS / FishS1DAC is the most memory-intensive addition; recommend testing on iPhone 15 or later
+- `MLXAudioASR` requires a code update to dispatch to the new STT model classes
 
 ---
 
-## Upgrade Recommendation
+## Required App-Side Changes
 
-**Proceed with upgrade.** All changes are either additive (LID module) or corrective (Parakeet mel scale, Qwen3 performance). No breaking changes to existing APIs. The Parakeet mel scale fix is the most impactful correctness improvement and should be rolled out to users as soon as possible.
+1. **MLXAudioASR.swift** (Done): Added multi-model dispatch factory. Without it, only Qwen3 ASR would load; SenseVoice, FireRed ASR 2, and Granite Speech would silently fall back to Qwen3.
+2. **LocalModelAboutView.swift** (Done): Updated `mlxAudioSwiftInfo` version, date, supported model list, and whatsNew entries.
+3. **MLXAudioSpeaker.swift**: No changes needed. Already uses `TTS.loadModel()` factory, which now includes Echo TTS automatically.
