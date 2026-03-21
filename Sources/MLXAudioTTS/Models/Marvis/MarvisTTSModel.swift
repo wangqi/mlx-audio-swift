@@ -603,14 +603,19 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
         streamingInterval: Double
     ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
-        
-        Task { @Sendable [weak self, continuation] in
+
+        // wangqi modified 2026-03-21
+        // Capture the inner Task so onTermination can cancel it when the stream consumer
+        // stops consuming (e.g. MLXAudioSpeaker breaks out of the for-try-await loop on
+        // task cancellation). Without this, the generation task keeps running and accessing
+        // the model after MLXAudioSpeaker has started a new generation, causing data races.
+        let generationTask = Task { @Sendable [weak self, continuation] in
             guard let self else { return }
-            
+
             do {
                 _ = generationParameters
                 let resolvedVoice = try resolveVoice(from: voice)
-                
+
                 for try await chunk in generate(
                     text: text,
                     voice: resolvedVoice,
@@ -621,13 +626,17 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
                 ) {
                     continuation.yield(.audio(MLXArray(chunk.audio)))
                 }
-                
+
                 continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
             }
         }
-        
+
+        continuation.onTermination = { _ in
+            generationTask.cancel()
+        }
+
         return stream
     }
 }
