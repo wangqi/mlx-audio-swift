@@ -1,100 +1,121 @@
-# mlx-audio-swift Upgrade Notes: tag-20260309 to tag-20260315
+# mlx-audio-swift: What's New (tag-20260315 to tag-20260321)
 
 ## Commits Included
 
-| Hash | Title |
-|------|-------|
-| cae5593 | Fix window chunking for Qwen3 ASR (#92) |
-| fcbd04d | Add Granite Speech 4 (#95) |
-| 035f0e0 | Fill in some missing codecs (#96) |
-| 8fb5fdf | Add Echo TTS (#97) |
-| 00432632 | Add FireRed ASR 2 (#98) |
-| db2635b | Add SenseVoice (#99) |
+| Commit | Description |
+|--------|-------------|
+| a153236 | Add Chatterbox Turbo (#102) — ResembleAI voice cloning TTS port |
+| 40918f5 | Update README.md (#104) — documentation update |
+| 6b8fcc0 | Add Fish Audio S2 Pro model (#106) — FishSpeech S2 Pro TTS |
+| 1755fc1 | Add README for Qwen3 TTS (#107) — documentation only |
+| d54d2ee | Merge branch 'Blaizzy:main' into main |
 
 ---
 
 ## New Features
 
-### New STT Models
+### 1. Chatterbox TTS / Chatterbox Turbo (PR #102)
 
-**SenseVoice** (db2635b)
-- Multi-language speech recognition from Alibaba/FunASR
-- Supports emotion recognition tags (`HAPPY`, `SAD`, etc.) and acoustic event detection
-- 50+ language support including Chinese, English, Japanese, Korean, Cantonese
-- Uses a custom SenseVoice tokenizer backed by the refactored `UnigramTokenizer` in `MLXAudioCore`
-- model_type: `"sensevoice"`
+**What it is**: A port of ResembleAI's Chatterbox TTS model to MLX Swift. Two variants:
+- **Chatterbox Turbo** (`mlx-community/chatterbox-turbo-fp16`) — GPT-2 backbone, faster inference
+- **Chatterbox TTS** (`mlx-community/Chatterbox-TTS-fp16`) — LLaMA backbone, higher quality
 
-**FireRed ASR 2** (00432632)
-- Hybrid attention-based ASR from FireRed AI, optimized for Mandarin and English
-- Transformer encoder with CTC decoder; custom tokenizer with SentencePiece
-- model_type: `"fireredasr2"`
+**Key capabilities**:
+- Text-to-speech with 24kHz output
+- Voice cloning via reference audio conditioning (`refAudio` / `refText` params)
+- Streaming generation support (API-level; see iOS notes below)
+- Default conditioning from bundled speaker embeddings (no reference audio required)
+- Emotion tag support: `[laugh]`, `[sigh]`, etc. via S3Gen pipeline
 
-**IBM Granite Speech 4** (fcbd04d)
-- IBM Research speech model combining a WhisperEncoder audio backbone with a Granite language model
-- End-to-end encoder-decoder architecture with cross-attention projection
-- model_type: `"granite_speech"` / `"granite"`
+**Architecture (multi-stage pipeline)**:
+- **T3 (Text-to-Semantic)**: GPT-2 or LLaMA backbone generating semantic tokens
+  - `T3GPT2Model`: 12-layer GPT-2 with learned position embeddings
+  - `T3CondEnc`: Conditioning encoder fusing speaker embeddings + reference semantics
+  - `Perceiver`: Cross-attention resampler for audio conditioning
+- **S3Gen (Semantic-to-Speech)**:
+  - `S3TokenizerV2`: Semantic speech tokenizer
+  - `CAMPPlus`: Speaker encoder (Conformer backbone) for voice cloning
+  - `ConformerEncoder`: 12-layer conformer for acoustic modeling
+  - `FlowMatching`: Diffusion-based flow matching vocoder
+  - `HiFTGenerator`: HiFT-based neural vocoder producing 24kHz audio
 
-### New TTS Models
+**Model type identifiers**: `"chatterbox"`, `"chatterbox_tts"`, `"chatterbox_turbo"`
 
-**Echo TTS** (8fb5fdf)
-- DiT (Diffusion Transformer) based TTS model
-- Uses FishS1DAC as the audio codec (newly added this cycle)
-- Flow-matching generation with configurable diffusion steps
-- Already registered in `TTS.loadModel()` factory under types `"echo_tts"` / `"echo"`
-- model_type: `"echo_tts"`
+**API conformance**: Implements `SpeechGenerationModel` — compatible with the existing `generateSamplesStream()` call in `MLXAudioSpeaker`. Voice cloning requires passing non-nil `refAudio`/`refText` (not currently exposed in app UI).
 
-### New Audio Codecs (035f0e0)
-
-**BigVGAN** - NVIDIA neural vocoder; mel-spectrogram to waveform via multi-period discriminator
-
-**Descript DAC** - High-fidelity general-purpose audio tokenizer using Residual Vector Quantization (RVQ)
-
-**FishS1DAC** - FishAudio S1 dual-codebook codec used by Echo TTS; dual-stream Mamba + Transformer decoder
+**Streaming note**: `generateStream()` internally calls `generate()` which produces the full audio before yielding. There is no true token-by-token streaming for Chatterbox — the 2-second `streamingInterval` parameter has no effect. Audio arrives as a single chunk after full generation.
 
 ---
 
-## Bug Fixes
+### 2. Fish Speech S2 Pro (PR #106)
 
-**Qwen3 ASR window chunking** (cae5593)
-- Fixed a variable scope bug: loop windows were appended with undefined index `i` instead of `windowIndex`
-- For long audio with multiple transcript windows, this caused incorrect window ordering after sort, producing garbled output
-- Added unit tests covering multi-window scenarios
+**What it is**: Fish Audio's S2 Pro model as a new `FishSpeechModel` class. Extends the existing `FishS1DAC` codec (added in tag-20260315) into a full TTS pipeline.
 
----
+**Key capabilities**:
+- Text-to-speech with voice cloning via `refAudio`/`refText`
+- VQGAN-based codec tokenizer for semantic code generation
+- Zero-shot voice cloning via `FishSpeechPrompt`
 
-## Refactoring
+**Architecture**:
+- `FishSpeechModel`: Main model conforming to `SpeechGenerationModel`
+- `FishSpeechTokenizer`: VQGAN codec tokenizer for encoding/decoding
+- `FishSpeechPrompt`: Prompt builder for voice conditioning
+- Reuses `FishS1DAC` codec (already present in tag-20260315) for final audio decoding
 
-**UnigramTokenizer moved to MLXAudioCore** (db2635b)
-- `UnigramTokenizer` and its protobuf parser (`SentencePieceModelParser`, `SentencePieceProtobufReader`) moved from `MLXAudioTTS/Models/PocketTTS/` to `MLXAudioCore`
-- `PocketTTSConditioners` now calls `UnigramTokenizer(sentencePieceModelData:)` instead of the previously local custom parser
-- New convenience initializers: `init(sentencePieceModelData:)`, `init(tokenizerJSONData:)`, plus static factories `from(tokenizerJSONURL:)` and `from(sentencePieceModelURL:)`
-- **Conflict resolved in our fork**: The custom `parseSentencePieceProto` method in `SentencePieceTokenizer` was removed in favour of the upstream `UnigramTokenizer(sentencePieceModelData:)` which delegates to the rewritten `SentencePieceModelParser`
+**Model type identifiers**: `"fish_speech"`, `"fish_qwen3_omni"`
 
----
+**API note**: The `voice` and `language` parameters are currently ignored in FishSpeech. Voice cloning uses `refAudio`/`refText` directly.
 
-## iOS Compatibility Assessment
-
-| Feature | iOS Risk | Notes |
-|---------|----------|-------|
-| Qwen3 ASR window fix | Low | Pure logic fix; no API changes |
-| SenseVoice STT | Low | Pure Swift + MLX; no platform APIs |
-| FireRed ASR 2 | Low | Pure Swift + MLX; SentencePiece binary tokenizer |
-| Granite Speech 4 | Low | Pure Swift + MLX; dual-encoder cross-attention |
-| Echo TTS | Low-Medium | FishS1DAC codec is new and memory-intensive |
-| BigVGAN / Descript DAC | Low | Pure Swift + MLX; not used by any default model yet |
-| FishS1DAC codec | Low-Medium | Mamba layers; may be demanding on older devices |
-| UnigramTokenizer refactor | Low | Conflict resolved correctly; upstream parser is equivalent |
-
-**Overall risk: Low**
-- All changes are pure Swift/MLX with no platform-specific APIs
-- No changes to audio I/O, AVFoundation, or CoreML paths
-- Echo TTS / FishS1DAC is the most memory-intensive addition; recommend testing on iPhone 15 or later
-- `MLXAudioASR` requires a code update to dispatch to the new STT model classes
+**AudioUtils extension**: Minor addition to `AudioUtils.swift` to support FishSpeech audio processing.
 
 ---
 
-## Required App-Side Changes
+## iOS-Specific Considerations
 
-1. **MLXAudioASR.swift** (Done): Added multi-model dispatch factory. Without it, only Qwen3 ASR would load; SenseVoice, FireRed ASR 2, and Granite Speech would silently fall back to Qwen3.
-2. **LocalModelAboutView.swift** (Done): Updated `mlxAudioSwiftInfo` version, date, supported model list, and whatsNew entries.
-3. **MLXAudioSpeaker.swift**: No changes needed. Already uses `TTS.loadModel()` factory, which now includes Echo TTS automatically.
+### Memory Pressure
+
+Both new models are large and memory-intensive:
+
+| Model | Architecture | iOS Risk |
+|-------|-------------|----------|
+| Chatterbox Turbo FP16 | GPT-2 + multi-stage vocoder | High — 5-stage pipeline holds multiple large tensors |
+| Chatterbox TTS FP16 | LLaMA + multi-stage vocoder | Very High — LLaMA backbone uses significantly more RAM |
+| Fish Speech S2 Pro | VQGAN tokenizer + FishS1DAC codec | Medium-High — similar to FishSpeech S1 complexity |
+
+The existing `MLXAudioSpeaker` memory pressure monitor (`.warning` and `.critical` thresholds) correctly releases `ttsModel` and clears the MLX cache. No code change needed.
+
+### First-Audio Latency
+
+Chatterbox does NOT true-stream. Full audio generation completes before any audio is yielded. On iPhone-class hardware, first-audio latency for Chatterbox may be 10-30+ seconds depending on text length. Users should be warned via the model description in the catalog.
+
+### Voice Cloning API
+
+Both models support voice cloning via `refAudio: MLXArray?` and `refText: String?`. The current `MLXAudioSpeaker` always passes `nil`, using default/bundled speaker conditioning. Voice cloning is a future UI enhancement opportunity.
+
+### Model Recommendation
+
+For iOS catalog, prefer exposing only **Chatterbox Turbo** (GPT-2 backbone). The LLaMA variant is likely to OOM on devices with less than 8GB RAM.
+
+---
+
+## Risk Assessment
+
+| Risk | Level | Mitigation |
+|------|-------|-----------|
+| Memory OOM on iPhone with Chatterbox LLaMA variant | High | Expose only Chatterbox Turbo in catalog; memory pressure monitor handles cleanup |
+| High first-audio latency for Chatterbox | Medium | Document in model description; no streaming means full wait before audio starts |
+| API compatibility | None | Both models conform to `SpeechGenerationModel`; no code changes required |
+| MLXAudioASR unaffected | None | No new STT models in this upgrade |
+| FishS1DAC codec re-use | None | FishSpeech S2 Pro reuses codec from tag-20260315; well-tested path |
+
+---
+
+## App Code Impact
+
+- **`MLXAudioSpeaker.swift`**: No changes needed. Both models are automatically dispatched by `TTS.loadModel()`.
+- **`MLXAudioASR.swift`**: No changes needed. No new STT models in this upgrade.
+- **`LocalModelAboutView.swift`**: Updated to reflect new models and version tag-20260321.
+
+---
+
+Upgrade date: 2026-03-21
