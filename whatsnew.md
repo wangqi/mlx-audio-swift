@@ -1,121 +1,85 @@
-# mlx-audio-swift: What's New (tag-20260315 to tag-20260321)
+# mlx-audio-swift: What's New (tag-20260321 → tag-20260328)
 
-## Commits Included
+## Upgrade Summary
 
-| Commit | Description |
-|--------|-------------|
-| a153236 | Add Chatterbox Turbo (#102) — ResembleAI voice cloning TTS port |
-| 40918f5 | Update README.md (#104) — documentation update |
-| 6b8fcc0 | Add Fish Audio S2 Pro model (#106) — FishSpeech S2 Pro TTS |
-| 1755fc1 | Add README for Qwen3 TTS (#107) — documentation only |
-| d54d2ee | Merge branch 'Blaizzy:main' into main |
+Changes merged from upstream `Blaizzy:main` into our fork between `tag-20260321` and `tag-20260328`.
 
 ---
 
 ## New Features
 
-### 1. Chatterbox TTS / Chatterbox Turbo (PR #102)
+### TTS: Kokoro with Multilingual Support (#124)
+- New `KokoroModel` added — a StyleTTS2-based TTS model with multilingual phonemization.
+- Ships with `KokoroMultilingualProcessor` using a ByT5-based G2P pipeline (100+ languages via `beshkenadze/g2p-multilingual-byT5-tiny-mlx`).
+- English G2P uses the Misaki port with a BART fallback network.
+- Voice style control via `voiceAliases` and `speedPriors` in config.
+- 24 kHz output, multi-speaker support.
 
-**What it is**: A port of ResembleAI's Chatterbox TTS model to MLX Swift. Two variants:
-- **Chatterbox Turbo** (`mlx-community/chatterbox-turbo-fp16`) — GPT-2 backbone, faster inference
-- **Chatterbox TTS** (`mlx-community/Chatterbox-TTS-fp16`) — LLaMA backbone, higher quality
+### TTS: KittenTTS (#123)
+- StyleTTS2-based TTS model sharing the new `StyleTTS2/` shared blocks (BiLSTM, AdaIN, SourceModule, etc.).
+- Uses `MisakiTextProcessor` for English phonemization.
+- Factory integration via `TTSModel` with `kitten_tts` case.
 
-**Key capabilities**:
-- Text-to-speech with 24kHz output
-- Voice cloning via reference audio conditioning (`refAudio` / `refText` params)
-- Streaming generation support (API-level; see iOS notes below)
-- Default conditioning from bundled speaker embeddings (no reference audio required)
-- Emotion tag support: `[laugh]`, `[sigh]`, etc. via S3Gen pipeline
+### New: MLXAudioG2P Module (#121, #122)
+- New `MLXAudioG2P` Swift package target for grapheme-to-phoneme conversion.
+- Includes dictionary-based and neural (ByT5 encoder-decoder) backends.
+- `NeuralPhonemizer` protocol conformance; word-level G2P for use with StyleTTS2 models.
+- `MLXAudioNeuralG2P` supports 100+ languages.
 
-**Architecture (multi-stage pipeline)**:
-- **T3 (Text-to-Semantic)**: GPT-2 or LLaMA backbone generating semantic tokens
-  - `T3GPT2Model`: 12-layer GPT-2 with learned position embeddings
-  - `T3CondEnc`: Conditioning encoder fusing speaker embeddings + reference semantics
-  - `Perceiver`: Cross-attention resampler for audio conditioning
-- **S3Gen (Semantic-to-Speech)**:
-  - `S3TokenizerV2`: Semantic speech tokenizer
-  - `CAMPPlus`: Speaker encoder (Conformer backbone) for voice cloning
-  - `ConformerEncoder`: 12-layer conformer for acoustic modeling
-  - `FlowMatching`: Diffusion-based flow matching vocoder
-  - `HiFTGenerator`: HiFT-based neural vocoder producing 24kHz audio
-
-**Model type identifiers**: `"chatterbox"`, `"chatterbox_tts"`, `"chatterbox_turbo"`
-
-**API conformance**: Implements `SpeechGenerationModel` — compatible with the existing `generateSamplesStream()` call in `MLXAudioSpeaker`. Voice cloning requires passing non-nil `refAudio`/`refText` (not currently exposed in app UI).
-
-**Streaming note**: `generateStream()` internally calls `generate()` which produces the full audio before yielding. There is no true token-by-token streaming for Chatterbox — the 2-second `streamingInterval` parameter has no effect. Audio arrives as a single chunk after full generation.
+### StyleTTS2 Shared Architecture (#122)
+- Shared blocks: `BiLSTM`, `WeightNormedConv`, `AdaIN`, `SourceModule`, `ISTFTNetConfig`, `PLBertConfig`.
+- `Albert.swift`: ALBERT encoder (6 Module-based classes) shared between KittenTTS and Kokoro.
+- Used by both KittenTTS and Kokoro to reduce code duplication.
 
 ---
 
-### 2. Fish Speech S2 Pro (PR #106)
+## Bug Fixes
 
-**What it is**: Fish Audio's S2 Pro model as a new `FishSpeechModel` class. Extends the existing `FishS1DAC` codec (added in tag-20260315) into a full TTS pipeline.
+### Fix: Parakeet Multilingual Recognition (#108)
+- Parakeet mel filterbank was using a normalization mode that confused Russian phonemes with Polish/Latin transliteration.
+- Fixed mel filterbank computation for NeMo-trained models (HTK normalization applied correctly).
+- Special token filtering added to `ParakeetTokenizer.decode()` — `isSpecialToken()` now strips control tokens before output.
+- Result: Russian (and other non-English) transcription now matches NeMo CUDA reference output.
+- Tests added for special token filtering, eval mode, and mel invariants.
 
-**Key capabilities**:
-- Text-to-speech with voice cloning via `refAudio`/`refText`
-- VQGAN-based codec tokenizer for semantic code generation
-- Zero-shot voice cloning via `FishSpeechPrompt`
-
-**Architecture**:
-- `FishSpeechModel`: Main model conforming to `SpeechGenerationModel`
-- `FishSpeechTokenizer`: VQGAN codec tokenizer for encoding/decoding
-- `FishSpeechPrompt`: Prompt builder for voice conditioning
-- Reuses `FishS1DAC` codec (already present in tag-20260315) for final audio decoding
-
-**Model type identifiers**: `"fish_speech"`, `"fish_qwen3_omni"`
-
-**API note**: The `voice` and `language` parameters are currently ignored in FishSpeech. Voice cloning uses `refAudio`/`refText` directly.
-
-**AudioUtils extension**: Minor addition to `AudioUtils.swift` to support FishSpeech audio processing.
+### Fix: Qwen3 ASR Language Autodetection (#110)
+- Qwen3 ASR now supports `language: nil` in `STTGenerateParameters` to trigger in-model language autodetection.
+- `normalizeLanguageName()` maps short codes and aliases (e.g. `"ru"` to `"Russian"`, `"zh"` to `"Chinese"`) to canonical names that the model understands.
+- `mergeLanguages()` consolidates detected languages across chunks for accurate per-result language reporting.
+- `parseGeneratedChunk()` extracts embedded language tokens from model output correctly.
+- GLM ASR also updated to use `language: nil` as its default.
+- CLI flag `--language` now documents: omit to allow autodetect.
 
 ---
 
-## iOS-Specific Considerations
+## Performance Improvements
 
-### Memory Pressure
-
-Both new models are large and memory-intensive:
-
-| Model | Architecture | iOS Risk |
-|-------|-------------|----------|
-| Chatterbox Turbo FP16 | GPT-2 + multi-stage vocoder | High — 5-stage pipeline holds multiple large tensors |
-| Chatterbox TTS FP16 | LLaMA + multi-stage vocoder | Very High — LLaMA backbone uses significantly more RAM |
-| Fish Speech S2 Pro | VQGAN tokenizer + FishS1DAC codec | Medium-High — similar to FishSpeech S1 complexity |
-
-The existing `MLXAudioSpeaker` memory pressure monitor (`.warning` and `.critical` thresholds) correctly releases `ttsModel` and clears the MLX cache. No code change needed.
-
-### First-Audio Latency
-
-Chatterbox does NOT true-stream. Full audio generation completes before any audio is yielded. On iPhone-class hardware, first-audio latency for Chatterbox may be 10-30+ seconds depending on text length. Users should be warned via the model description in the catalog.
-
-### Voice Cloning API
-
-Both models support voice cloning via `refAudio: MLXArray?` and `refText: String?`. The current `MLXAudioSpeaker` always passes `nil`, using default/bundled speaker conditioning. Voice cloning is a future UI enhancement opportunity.
-
-### Model Recommendation
-
-For iOS catalog, prefer exposing only **Chatterbox Turbo** (GPT-2 backbone). The LLaMA variant is likely to OOM on devices with less than 8GB RAM.
+### MLXFast Dependency for MLXAudioCodecs (#128)
+- `MLXAudioCodecs` now depends on `MLXFast` from `mlx-swift`.
+- Enables hardware-accelerated codec operations (convolution, attention) via MLX's fast kernel path.
+- Transparent: no API changes required; codec models (BigVGAN, DAC, FishS1DAC) benefit automatically.
 
 ---
 
-## Risk Assessment
+## Risk Assessment for iOS Upgrade
 
-| Risk | Level | Mitigation |
-|------|-------|-----------|
-| Memory OOM on iPhone with Chatterbox LLaMA variant | High | Expose only Chatterbox Turbo in catalog; memory pressure monitor handles cleanup |
-| High first-audio latency for Chatterbox | Medium | Document in model description; no streaming means full wait before audio starts |
-| API compatibility | None | Both models conform to `SpeechGenerationModel`; no code changes required |
-| MLXAudioASR unaffected | None | No new STT models in this upgrade |
-| FishS1DAC codec re-use | None | FishSpeech S2 Pro reuses codec from tag-20260315; well-tested path |
+| Area | Risk | Notes |
+|------|------|-------|
+| Parakeet fix | **Low** | Bug fix only; no API changes. Non-English ASR accuracy improves. |
+| Qwen3 autodetect | **Low** | `language: nil` was already a valid parameter; model behavior change is intentional and beneficial. |
+| Kokoro TTS | **Low** | New model type; `TTS.loadModel()` dispatches correctly. No changes needed in `MLXAudioSpeaker`. |
+| KittenTTS | **Low** | New model type; same load path as other TTS models. |
+| MLXAudioG2P | **Medium** | New Swift package target. Will increase binary size. Requires `MLXAudioG2P` dependency in Package.swift targets that use StyleTTS2 models. |
+| MLXFast codec dependency | **Low** | Additive dependency; no API breakage. May slightly increase build time on first resolve. |
+| StyleTTS2 shared blocks | **Low** | Internal to the package; no impact on our app code. |
 
----
+### Required App-Side Changes
 
-## App Code Impact
+1. **`MLXAudioASR`**: Change the language fallback from `"English"` to `nil` to enable Qwen3/GLM language autodetection when no language is configured.
+2. **`LocalModelAboutView`**: Update engine version, date, and what's new to reflect this upgrade.
+3. No changes needed in `MLXAudioSpeaker` — `TTS.loadModel()` handles Kokoro/KittenTTS dispatch transparently.
 
-- **`MLXAudioSpeaker.swift`**: No changes needed. Both models are automatically dispatched by `TTS.loadModel()`.
-- **`MLXAudioASR.swift`**: No changes needed. No new STT models in this upgrade.
-- **`LocalModelAboutView.swift`**: Updated to reflect new models and version tag-20260321.
-
----
-
-Upgrade date: 2026-03-21
+### iOS Device Considerations
+- Kokoro and KittenTTS include ByT5 G2P models that require a HuggingFace download on first use — ensure download flows handle this gracefully.
+- MLXFast kernels are Metal-backed; all Apple Silicon iOS devices (A14+) are fully supported.
+- Parakeet fix has no iOS-specific concerns.
