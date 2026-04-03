@@ -563,7 +563,9 @@ public class StreamingInferenceSession: @unchecked Sendable {
         params: DecodePassParams,
         continuation: AsyncStream<TranscriptionEvent>.Continuation?,
         sharedState: OSAllocatedUnfairLock<SessionSharedState>,
-        tokenizer: any Tokenizer,
+        // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+        // wangqi modified 2026-04-03
+        tokenizer: any Tokenizers.Tokenizer,
         totalSamples: Int,
         decodeTime: Double,
         genTokenCount: Int,

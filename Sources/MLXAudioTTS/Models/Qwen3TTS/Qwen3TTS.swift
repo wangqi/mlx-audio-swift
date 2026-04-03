@@ -13,7 +13,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     let talker: Qwen3TTSTalkerForConditionalGeneration
     var speakerEncoder: Qwen3TTSSpeakerEncoder?
     var speechTokenizer: Qwen3TTSSpeechTokenizer?
-    var tokenizer: Tokenizer?
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    var tokenizer: Tokenizers.Tokenizer?
 
     public var sampleRate: Int { config.sampleRate }
 

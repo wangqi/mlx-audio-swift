@@ -184,7 +184,9 @@ private class SopranoModelInner: Module {
 public class SopranoModel: Module, KVCacheDimensionProvider, SpeechGenerationModel, @unchecked Sendable {
     public let vocabularySize: Int
     public let kvHeads: [Int]
-    public var tokenizer: Tokenizer?
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    public var tokenizer: Tokenizers.Tokenizer?
 
     private let model: SopranoModelInner
     let configuration: SopranoConfiguration

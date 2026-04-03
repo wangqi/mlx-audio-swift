@@ -354,7 +354,9 @@ private class LlamaTTSModelInner: Module {
 public class LlamaTTSModel: Module, KVCacheDimensionProvider, SpeechGenerationModel, @unchecked Sendable {
     public let vocabularySize: Int
     public let kvHeads: [Int]
-    public var tokenizer: Tokenizer?
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    public var tokenizer: Tokenizers.Tokenizer?
     public var _snacModel: SNAC?
 
     private let model: LlamaTTSModelInner

@@ -914,7 +914,9 @@ public class Qwen3ASRModel: Module {
     @ModuleInfo(key: "model") var model: Qwen3ASRTextModel
     @ModuleInfo(key: "lm_head") var lmHead: Linear?
 
-    public var tokenizer: Tokenizer?
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    public var tokenizer: Tokenizers.Tokenizer?
 
     /// Sample rate expected by the model (16kHz).
     public let sampleRate: Int = 16000

@@ -4,7 +4,8 @@ import MLX
 import MLXAudioCore
 import MLXNN
 import MLXLMCommon
-import Tokenizers
+// Tokenizers (swift-transformers) removed — upstream dropped swift-transformers dependency; import was unused
+// wangqi modified 2026-04-03
 
 // MARK: - Configs
 

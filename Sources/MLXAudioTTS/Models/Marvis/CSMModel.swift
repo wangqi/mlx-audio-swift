@@ -4,7 +4,8 @@ import Hub
 import MLX
 import MLXLMCommon
 import MLXNN
-import Tokenizers
+// Tokenizers import removed — unused in this file, causes ambiguity with MLXLMCommon.Tokenizer
+// wangqi modified 2026-04-03
 
 // MARK: - Configs
 

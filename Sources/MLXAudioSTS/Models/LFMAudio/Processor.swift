@@ -198,7 +198,9 @@ public class ChatState {
 public class LFM2AudioProcessor {
     public let config: LFM2AudioConfig
     let audioPreprocessor: AudioPreprocessor
-    private var _tokenizer: Tokenizer?
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    private var _tokenizer: Tokenizers.Tokenizer?
     public var modelPath: URL?
 
     public init(_ config: LFM2AudioConfig) {
@@ -206,7 +208,7 @@ public class LFM2AudioProcessor {
         self.audioPreprocessor = AudioPreprocessor(config.preprocessor)
     }
 
-    public var tokenizer: Tokenizer {
+    public var tokenizer: Tokenizers.Tokenizer {
         get throws {
             if let t = _tokenizer { return t }
             throw LFMAudioError.tokenizerNotLoaded

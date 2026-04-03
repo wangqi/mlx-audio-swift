@@ -33,7 +33,9 @@ protocol FishSpeechTokenizing: Sendable {
 }
 
 public final class FishSpeechTokenizer: FishSpeechTokenizing {
-    public let tokenizer: any Tokenizer
+    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
+    // wangqi modified 2026-04-03
+    public let tokenizer: any Tokenizers.Tokenizer
     public let vocabSize: Int
     public let semanticBeginID: Int
     public let semanticEndID: Int
@@ -48,7 +50,7 @@ public final class FishSpeechTokenizer: FishSpeechTokenizing {
             ?? 0
     }
 
-    init(tokenizer: any Tokenizer, vocabSizeHint: Int? = nil) throws {
+    init(tokenizer: any Tokenizers.Tokenizer, vocabSizeHint: Int? = nil) throws {
         self.tokenizer = tokenizer
 
         var semanticIDs: [Int] = []
