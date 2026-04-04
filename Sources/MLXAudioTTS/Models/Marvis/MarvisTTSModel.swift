@@ -209,8 +209,16 @@ public extension MarvisTTSModel {
             weights = sanitize(weights: weights)
         }
         
+        // Filter out precomputed RoPE cache tensors — CSMLlama3ScaledRoPE recomputes them at
+        // runtime via ropeInit(), so these weight keys have no registered module property.
+        // Use .noUnusedKeys so any remaining unknown keys (cosF32/sinF32) are skipped silently
+        // instead of throwing "Key not found". Other models in mlx-audio-swift use this pattern
+        // for partial weight loads.
+        // wangqi modified 2026-04-03
+        weights = weights.filter { !$0.key.hasSuffix(".cosF32") && !$0.key.hasSuffix(".sinF32") }
+
         let parameters = ModuleParameters.unflattened(weights)
-        try model.update(parameters: parameters, verify: .all)
+        try model.update(parameters: parameters, verify: .noUnusedKeys)
         
         eval(model)
         return model
