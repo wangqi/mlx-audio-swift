@@ -1,71 +1,97 @@
-# mlx-audio-swift What's New
+# mlx-audio-swift Upgrade: tag-20260412 → tag-20260419
 
-## tag-20260412 (2026-04-12)
+## Summary
 
-### Changes from tag-20260406
-
-Six commits landed in this release, covering one new STT model family, two important bug fixes, a speaker-embedding feature for Qwen3-TTS CustomVoice, and convenience methods for loading models from local directories.
+Six commits merged between 2026-04-12 and 2026-04-19: three bug fixes, one ASR feature, one TTS performance enhancement, and one build housekeeping change.
 
 ---
 
-#### New Features
+## Changes
 
-**Cohere Transcribe STT (commit d5394bd)**
+### 1. Fix: Kokoro textProcessor Not Forwarded in fromPretrained (#151)
+**Severity: High**
 
-A new `CohereTranscribeModel` is added under `Sources/MLXAudioSTT/Models/CohereTranscribe/`. It implements `STTGenerationModel` and follows the same `generateStream(audio:generationParameters:)` interface as Parakeet, Granite Speech, and others.
+`KokoroModel.fromPretrained(_:cache:textProcessor:)` accepted a `textProcessor` parameter but silently discarded it — never passing it through to `fromModelDirectory`. This bypassed the G2P pipeline (MisakiTextProcessor / KokoroMultilingualProcessor), sending raw English text directly to the character-level phoneme tokenizer and producing garbled speech output for all Kokoro models.
 
-- Supports quantized checkpoints
-- `fromDirectory(_ modelDir: URL)` for loading from a pre-downloaded local path
-- Note: `fromPretrained` does not accept `HubCache`; use `fromDirectory()` when using an app-managed cache
+Fix: one-line pass-through added in `KokoroModel.fromPretrained`.
 
-**Qwen3-TTS CustomVoice Speaker Embedding (commits 56d0811, 9264f40)**
-
-For models with `ttsModelType == "custom_voice"` (e.g. `Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit`):
-
-- Flexible decoding of `spk_id` (single `Int` vs. `[Int]`) and `spk_is_dialect` (`Bool` vs. dialect-name `String`) in `config.json`
-- Speaker embedding injection: looks up the speaker name in `talkerConfig.spkId`, calls `talker.getInputEmbeddings()`, and injects the embedding between codec prefix and pad+bos tokens in `prepareGenerationInputs`
-- Dialect language-ID override applied when `spk_is_dialect` flag is set
-
-Effect: Voice identity is now preserved across sentences for CustomVoice models. Previously, each sentence defaulted to the model's base voice regardless of the `voice` parameter.
-
-**`fromModelDirectory` Convenience Methods (commit da93511)**
-
-Every major model class now has `fromModelDirectory(_ modelDir: URL)` alongside `fromPretrained`. Affected classes include `Qwen3ASRModel`, `GraniteSpeechModel`, `GLMASR`, `ChatterboxModel`, `EchoTTSModel`, `FishSpeechModel`, `LlamaTTS`, `PocketTTSModel`, `Qwen3TTS`, `Soprano`, `KittenTTSModel`, `KokoroModel`, `SmartTurn`, codecs (DACVAE, DescriptDAC, Encodec, SNAC), and audio enhancement models.
+**Risk: None** — internal fix, no API change. `TTS.loadModel()` path corrected automatically.
 
 ---
 
-#### Bug Fixes
+### 2. Feature: Qwen3 ASR Context Support (#126)
+**Severity: Enhancement**
 
-**Kokoro 8-bit Crash and NaN Duration Fix (commit 5196558)**
+`Qwen3ASRModel` now accepts a `context` string in `generate()` and `generateStream()`, allowing prior transcript text to guide decoding. Useful for multi-segment audio with technical vocabulary or speaker names.
 
-Three distinct bugs fixed for quantized Kokoro checkpoints:
+The `STTGenerationModel` protocol conformance maps `STTGenerateParameters` → `context: ""` by default, so all existing callers are unaffected.
 
-1. Weight transposition crash: `sanitize()` was unconditionally transposing 3D weights; MLX-converted quantized weights are already in the correct layout. Fixed with an `isQuantized` guard.
-2. NaN duration propagation from quantized encoder: added explicit NaN guard; NaN values are replaced with a minimum duration.
-3. OOM from garbage duration values: raw `int32` cast of a NaN float produced huge index values. Fixed with a cap at 100 frames and silence return on empty indices.
-
-Effect: Quantized Kokoro models (8-bit) now load and run correctly on devices with limited RAM.
-
-**ParakeetQuantizationConfig Decoding Fix (commit ef4e10d)**
-
-Enhanced config decoder to handle unexpected `model_type` values in quantized Parakeet checkpoints, preventing a decode failure when loading certain quantized Parakeet variants.
+**Risk: None** — backward-compatible; empty context = prior behavior.
 
 ---
 
-#### Upgrade Risk Assessment
+### 3. Performance: Qwen3 TTS Reference Audio Caching (#125)
+**Severity: Enhancement (performance)**
 
-| Area | Risk | Notes |
-|------|------|-------|
-| Kokoro TTS (quantized) | Low | Bug fix only; no API change |
-| Qwen3-TTS CustomVoice | Low | Automatic via library; `generateSamplesStream()` unchanged |
-| Parakeet quantized | Low | Config parsing fix; transparent |
-| Cohere Transcribe STT | Low | New model type; requires explicit wiring in makeSTTModel() |
-| fromModelDirectory API | None | Additive; no existing call sites affected |
+`Qwen3TTS` now caches the speaker embedding computed from a reference audio array between successive generation calls. Cache is keyed on `ObjectIdentifier` of the `MLXArray` instance — when the same reference is reused across chunks, the speaker encoder runs only once instead of once per chunk.
 
-Overall upgrade risk: Low. No breaking API changes. The Kokoro fix and Qwen3-TTS CustomVoice speaker embedding are the most impactful improvements for end users.
+Our `MLXAudioSpeaker.speakText()` already loads one `refAudioArray` and passes it to every chunk's `generateSamplesStream` call within a single session. This caching eliminates redundant speaker encoding for all multi-chunk voice-clone TTS sessions.
+
+**Risk: Low** — cache is keyed on object identity; a new `MLXArray` (new speak call, new clone profile) bypasses the cache correctly. Memory overhead: one `ReferenceAudioContext` (speaker embedding tensor) kept alive per loaded model.
 
 ---
 
-## tag-20260403 (2026-04-03)
+### 4. Fix: CohereTranscribe Quantized Checkpoint Loading (#153)
+**Severity: High**
 
-### Changes from tag-20260328
+`CohereTranscribeModel` previously failed to load Python-produced quantized (int8/int4) checkpoints with opaque key-not-found errors. Fix adds:
+- Python → Swift key prefix alias mapping (encoder/decoder/head prefixes)
+- Structural Q/K/V weight merge for Conformer and Transformer decoder blocks
+- Companion key derivation (`.scales` / `.biases` from base key)
+- Pre-load inventory validation with actionable diagnostics
+
+Our `MLXAudioASR.makeSTTModel()` routes Cohere repos to `CohereTranscribeModel.fromDirectory()` — the fix is transparent.
+
+**Risk: None** — loading logic is internal; calling convention unchanged.
+
+---
+
+### 5. Build: Exclude In-Tree READMEs from Package Targets (#152)
+**Severity: Housekeeping**
+
+`Package.swift` updated to exclude nested `README.md` files from SwiftPM target source sets. No runtime or API changes.
+
+**Risk: None** — build-time only.
+
+---
+
+## iOS-Specific Impact
+
+| Change | iPhone / iPad Effect |
+|--------|---------------------|
+| Kokoro textProcessor fix | Kokoro TTS now produces correctly phonemized speech (previously garbled on iOS) |
+| Qwen3 TTS caching | Voice-clone multi-chunk sessions faster; speaker encoding skipped after first chunk |
+| Qwen3 ASR context | No behavior change; empty context = prior behavior |
+| CohereTranscribe quant fix | Quantized (smaller, 8/4-bit) Cohere STT models now load correctly on device; better iOS memory compatibility |
+
+---
+
+## Upgrade Risk Assessment
+
+**Overall risk: Low**
+
+- All three bug fixes are internal to model classes with no API surface changes.
+- The performance enhancement is additive and backward-compatible.
+- `Package.swift` target structure is unchanged from our integration perspective.
+- The `CohereTranscribeModel.fromDirectory()` calling convention in `MLXAudioASR.makeSTTModel()` is unchanged.
+- iOS memory: Qwen3 TTS caches one `ReferenceAudioContext` per model instance — negligible.
+
+---
+
+## Required Code Changes in App
+
+**None required.** All fixes and improvements apply automatically via the updated library.
+
+### Optional Enhancement: Qwen3 ASR Context for Batch Transcription
+
+`MLXAudioASR.transcribe()` currently passes `STTGenerateParameters(language:chunkDuration:)` with no context. The new `context` parameter in Qwen3 ASR could improve accuracy for multi-turn dictation by passing previously transcribed text. This would require adding a `context` field to `STTGenerateParameters` or `ASRProtocol.transcribe()`. Not urgent — the streaming path (`StreamingInferenceSession`) handles context internally.
