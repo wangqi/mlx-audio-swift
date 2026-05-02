@@ -1351,7 +1351,7 @@ public class Qwen3ASRModel: Module {
         let sendableModel = UncheckedSendableBox(self)
         let sendableAudio = UncheckedSendableBox(audio)
         return AsyncThrowingStream { continuation in
-            Task.detached {
+            let task = Task.detached {
                 let model = sendableModel.value
                 let audio = sendableAudio.value
                 do {
@@ -1499,6 +1499,7 @@ public class Qwen3ASRModel: Module {
                     continuation.finish(throwing: error)
                 }
             }
+            continuation.onTermination = { @Sendable _ in task.cancel() }
         }
     }
 

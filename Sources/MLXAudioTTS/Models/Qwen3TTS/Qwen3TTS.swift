@@ -411,6 +411,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         }
 
         for step in 0 ..< effectiveMaxTokens {
+            try Task.checkCancellation()
             // Forward pass through talker
             let (logits, hidden) = talker(inputEmbeds, cache: cache)
 
@@ -509,6 +510,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             }
         }
 
+        try Task.checkCancellation()
+
         guard !generatedCodes.isEmpty else {
             return MLXArray.zeros([1])
         }
@@ -525,6 +528,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             peakMemoryUsage: Double(Memory.peakMemory) / 1e9
         )
         onInfo?(info)
+        try Task.checkCancellation()
 
         // Streaming path: yield remaining tokens and return early
         if let onAudioChunk {
@@ -645,7 +649,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         ) throws -> Void
     ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
-        Task { @Sendable [weak self] in
+        let task = Task { @Sendable [weak self] in
             guard let self else { return }
             do {
                 try requireGenerationComponents()
@@ -660,6 +664,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 continuation.finish(throwing: error)
             }
         }
+        continuation.onTermination = { @Sendable _ in task.cancel() }
         return stream
     }
 

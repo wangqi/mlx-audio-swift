@@ -6,8 +6,8 @@ public struct TokenizedText {
     public let tokens: MLXArray
 }
 
-public final class SentencePieceTokenizer {
-    public let tokenizer: UnigramTokenizer
+public final class PocketTTSSentencePieceTokenizer {
+    public let tokenizer: MLXAudioCore.SentencePieceTokenizer
 
     // wangqi 2026-02-27: support tokenizer.model (SentencePiece binary) as fallback when tokenizer.json is absent
     public init(nBins: Int, modelFolder: URL) async throws {
@@ -16,7 +16,7 @@ public final class SentencePieceTokenizer {
         if FileManager.default.fileExists(atPath: tokenizerJSON.path),
            let data = try? Data(contentsOf: tokenizerJSON),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            self.tokenizer = try UnigramTokenizer(tokenizerJSON: json)
+            self.tokenizer = try MLXAudioCore.SentencePieceTokenizer(tokenizerJSON: json)
             return
         }
 
@@ -30,7 +30,7 @@ public final class SentencePieceTokenizer {
                 userInfo: [NSLocalizedDescriptionKey: "Missing tokenizer.json or tokenizer.model in \(modelFolder.path)"]
             )
         }
-        self.tokenizer = try UnigramTokenizer(sentencePieceModelData: data)
+        self.tokenizer = try MLXAudioCore.SentencePieceTokenizer(sentencePieceModelData: data)
     }
 
     public func callAsFunction(_ text: String) -> TokenizedText {
@@ -49,7 +49,7 @@ public final class SentencePieceTokenizer {
 }
 
 public final class LUTConditioner: Module {
-    public let tokenizer: SentencePieceTokenizer
+    public let tokenizer: PocketTTSSentencePieceTokenizer
     public let dim: Int
     public let outputDim: Int
 
@@ -57,7 +57,7 @@ public final class LUTConditioner: Module {
     @ModuleInfo(key: "output_proj") public var output_proj: Linear?
 
     public init(nBins: Int, modelFolder: URL, dim: Int, outputDim: Int) async throws {
-        self.tokenizer = try await SentencePieceTokenizer(nBins: nBins, modelFolder: modelFolder)
+        self.tokenizer = try await PocketTTSSentencePieceTokenizer(nBins: nBins, modelFolder: modelFolder)
         self.dim = dim
         self.outputDim = outputDim
         self._embed = ModuleInfo(wrappedValue: Embedding(embeddingCount: nBins + 1, dimensions: dim))

@@ -377,8 +377,8 @@ public extension MarvisTTSModel {
         streamingInterval: Double = 0.5
     ) -> AsyncThrowingStream<GenerationResult, Error> {
         let (stream, continuation) = AsyncThrowingStream<GenerationResult, Error>.makeStream()
-        
-        Task { @Sendable [weak self, continuation] in
+
+        let task = Task { @Sendable [weak self, continuation] in
             guard let self else { return }
             do {
                 guard voice != nil || refAudio != nil else {
@@ -493,9 +493,10 @@ public extension MarvisTTSModel {
                 continuation.finish(throwing: error)
             }
         }
+        continuation.onTermination = { @Sendable _ in task.cancel() }
         return stream
     }
-    
+
     private static func textPieces(_ text: String, splitPattern: String?) -> [String] {
         let pieces: [String]
         if let pat = splitPattern, let re = try? NSRegularExpression(pattern: pat) {
@@ -645,9 +646,7 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
             }
         }
 
-        continuation.onTermination = { _ in
-            generationTask.cancel()
-        }
+        continuation.onTermination = { @Sendable _ in generationTask.cancel() }
 
         return stream
     }
