@@ -19,3 +19,8 @@ public enum MossTTSNanoError: Error, CustomStringConvertible {
         }
     }
 }
+
+// wangqi modified 2026-05-03
+extension MossTTSNanoError: LocalizedError {
+    public var errorDescription: String? { description }
+}
