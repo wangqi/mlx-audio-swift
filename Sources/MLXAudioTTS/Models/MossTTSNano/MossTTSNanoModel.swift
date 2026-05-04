@@ -506,7 +506,10 @@ public final class MossTTSNanoModel: Module, SpeechGenerationModel, @unchecked S
         let audioTokenIDs = allAudioTokens.isEmpty
             ? MLXArray.zeros([1, 0, config.nVQ], type: Int32.self)
             : MLX.concatenated(allAudioTokens, axis: 1).asType(.int32)
-        return try decodeAudioTokenIDs(audioTokenIDs, numQuantizers: config.nVQ)
+        // MOSS-TTS-Nano decodes stereo audio [N, 2]; mix to mono [N] for standard playback.
+        // wangqi modified 2026-05-04
+        let decoded = try decodeAudioTokenIDs(audioTokenIDs, numQuantizers: config.nVQ)
+        return decoded.ndim == 2 && decoded.dim(1) > 1 ? mean(decoded, axis: 1) : decoded
     }
 
     public func generateStream(
