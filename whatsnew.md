@@ -1,84 +1,101 @@
-# mlx-audio-swift Upgrade: tag-20260425 → tag-20260502
+# mlx-audio-swift: What's New (tag-20260502 → tag-20260509)
 
-## Summary
+## Upgrade Summary
 
-Three upstream commits merged in this period. The primary addition is a new **MOSS-TTS-Nano** TTS model; the rest are library-wide cancellation reliability improvements.
+Merged upstream changes from the Blaizzy/mlx-audio-swift `main` branch into our fork. Three upstream features landed alongside two local bug fixes already in our fork.
 
 ---
 
 ## New Features
 
-### MOSS-TTS-Nano TTS Model (`dfb9382`)
+### 1. MOSS-TTS Full Model (`MossTTSModel`)
 
-A new lightweight, fast bilingual (Chinese/English) TTS model based on a GPT2-style transformer architecture with SNAC audio tokenizer codebooks.
+**Commit:** `7734cd1` — Add MOSS-TTS model family (#179)
 
-**Architecture:**
-- Dual-transformer design: a global `MossGPT2Model` transformer for text-to-audio-token generation, plus a local transformer for fine-grained audio token refinement
-- Multi-codebook SNAC audio tokenizer for encoding/decoding reference audio (voice cloning)
-- `SentencePieceTokenizer` now supports both **Unigram** and **BPE** model types — the BPE variant is required by MOSS-TTS-Nano
+The full MOSS-TTS model uses a Qwen3 LLM backbone (instead of MossTTSNano's GPT-2 backbone) for higher-quality bilingual (Chinese/English) speech synthesis. It adds:
 
-**Capabilities:**
-- Voice cloning: pass `refAudio` + `refText` to reproduce a target speaker's timbre
-- Default generation parameters: `temperature=0.7`, `topP=0.9`, `topK=50`, `repetitionPenalty=1.1`, `maxTokens=375`
-- Sample rate: determined by `config.audioTokenizerSampleRate` (typically 24 kHz)
+- `MossTTSModel` — Qwen3-based dual-transformer TTS with SNAC audio tokenizer
+- `MossTTSProcessor` — text tokenization and preprocessing pipeline
+- `MossTTSQwen3` — Qwen3 language model frontend
+- `MossTTSConfig` — full config with decoder/flow settings
+- `MossTTSFullSampling` — sampling strategy matching the Python reference
 
-**App impact:**
-- Available via `TTS.loadModel(modelRepo:)` when model config declares `model_type: "moss_tts_nano"`
-- Our `MLXAudioSpeaker` loads it transparently via the generic `generateSamplesStream` path — no code changes required
-- Voice clone profiles work out of the box since MOSS-TTS-Nano accepts the same `refAudio`/`refText` signature
+Already registered in `TTSModel.swift` dispatch table alongside MossTTSNano. No app-level code changes needed; models with matching repo ID will load automatically.
 
-**Dependencies:**
-- `Package.resolved` updated (new `originHash`) — standard submodule update behavior, no action needed
+**iOS risk:** Medium. Large model (Qwen3 backbone). Memory budget check via `SystemMemoryHelper.willLoadAudioModel()` is already in place. Voice-cloning mode requires reference audio — same requirement as MossTTSNano.
 
 ---
 
-## Bug Fixes
+### 2. Qwen3-ASR: Chunked Prefill + Repetition Penalty + Loop Guard
 
-### Improved Task Cancellation Across All TTS Models (`fc4fe22`)
+**Commit:** `e5ba0d3` — Qwen3-ASR: chunked prefill + asyncEval + repetition penalty + loop guard (#174)
 
-All TTS model `generateStream()` implementations now properly:
-- Call `Task.checkCancellation()` at key inference checkpoints (between chunk generations, before/after model forward pass)
-- Wire `AsyncThrowingStream.Continuation.onTermination` so that if the consumer drops the stream, the internal generation `Task` is also cancelled
+Fixes a critical runaway-repetition bug on long-form audio (e.g. 57-minute recordings) that could consume up to **22 GB RAM** and stall for minutes.
 
-**Affected models:** Chatterbox, EchoTTS, FishSpeech, LlamaTTS, MarvisTTS, PocketTTS, Qwen3, Qwen3TTS, Soprano, KittenTTS (StyleTTS2), KokoroModel (StyleTTS2)
+**Changes to `STTGenerateParameters`:**
+- New field `repetitionPenalty: Float` (default `1.0` = disabled, backward-compatible)
+- New field `repetitionContextSize: Int` (default `32`)
 
-**App impact:**
-- Our `MLXAudioSpeaker.stopSpeaking()` already cancels the wrapping Swift `Task`. These library changes make the library's internal inference loops respond to that cancellation faster — reducing audio generation stall time after `stopSpeaking()` is called
-- No code changes required in `MLXAudioSpeaker`; the improved behavior is transparent
+**Internal Qwen3 improvements:**
+- Chunked prefill (window = 2048 tokens) with `eval+clearCache` between chunks
+- `asyncEval` pipelining matching `mlx_lm.generate.generate_step`
+- `MLX.Memory.clearCache()` every 256 generated tokens
+- Sign-aware repetition penalty applied before argmax
+- Heuristic fail-safe: stop if last 24 tokens contain <=3 unique IDs
 
-### Qwen3ASR Stream Cancellation Propagation (`d810daf`)
+**Recommended call site (now used in MLXAudioASR.swift):**
+```swift
+STTGenerateParameters(language: lang, chunkDuration: 30.0,
+                      repetitionPenalty: 1.15, repetitionContextSize: 32)
+```
 
-`Qwen3ASRModel.generateStream()` now correctly propagates Swift Task cancellation into the streaming inference session.
-
-**App impact:**
-- `MLXAudioASR.cancel()` sets `isCancelled = true` and our loop checks it. With this fix, the Qwen3ASR `generateStream()` now also terminates on Task cancellation — reducing the latency between `cancel()` and transcription stopping
-- No code changes required
-
----
-
-## Risks and Assessment
-
-### Risk Level: **Low**
-
-| Area | Risk | Mitigation |
-|------|------|------------|
-| MOSS-TTS-Nano loading | Low — follows standard `TTS.loadModel` factory pattern; only active if a MOSS model is configured | Gated by model config `model_type` field; existing models unaffected |
-| BPE tokenizer support | Low — additive change to `SentencePieceTokenizer`; unigram path unchanged | Regression-free: unigram models fall back to same logic |
-| Cancellation changes | Very low — makes existing cancellation more reliable; no behavior change when not cancelled | All changes are cooperative (add checkpoints, not interrupt-driven) |
-| Package.resolved update | Minimal — only reflects dependency version pins used by the SPM package itself | Does not affect our xcframework-based integration |
-
-### iOS Device Considerations
-
-- MOSS-TTS-Nano has a relatively small memory footprint for a voice-cloning TTS model (GPT2-based, ~400M parameters typical for nano variants). Suitable for A-series devices with 6 GB+ RAM.
-- The cancellation improvements are especially beneficial on iOS where the main thread is more resource-constrained — faster cancellation means less GPU/ANE time wasted after the user stops playback.
-- No new OS APIs introduced; changes are pure Swift/MLX.
+**iOS risk:** Low. Default `repetitionPenalty = 1.0` is fully backward-compatible. Enabling `1.15` for Qwen3 models is safe and eliminates the runaway-loop crash on long recordings. Performance improvement: ~8% faster on 57-minute audio.
 
 ---
 
-## App Code Changes Required
+### 3. Silero VAD Model (MLX Swift Port)
 
-**None required in MLXAudioSpeaker or MLXAudioASR.** Both benefit from all three commits automatically:
-- MOSS-TTS-Nano: loaded via existing `TTS.loadModel` factory with the `moss_tts_nano` model type, then uses the standard `generateSamplesStream` path
-- Cancellation fixes: transparent improvement to existing task cancellation flow
+**Commit:** `4bc0e94` — feat(vad): add Silero VAD model (#176)
 
-The only app changes are adding MOSS-TTS-Nano to the supported model list in `LocalModelAboutView.swift` and bumping the engine version/date.
+Swift/MLX port of the Python `mlx_audio.vad.silero_vad` implementation.
+
+**API surface:**
+- `SileroVAD.Model` — wraps dual SileroVADBranch (16kHz + 8kHz)
+- **Streaming API:** `initialState()` / `feed(chunk:state:sampleRate:)`
+- **Offline API:** `predictProba(audio:sampleRate:)` / `getSpeechTimestamps(audio:threshold:minSpeechDurationMs:...)`
+- Compatible with `mlx-community/silero-vad` (v5) and `mlx-community/silero-vad-v6`
+- `fromPretrained(repoId:)` downloads from HuggingFace
+
+Our current `MLXAudioVAD.swift` wraps `SmartTurnModel` (endpoint detection). Silero VAD serves a different purpose (presence/absence VAD). Integration path: add a new `MLXAudioSileroVAD` wrapper if needed in a follow-up.
+
+**iOS risk:** Low. New model type, no impact on existing SmartTurn/Endpoint detection flow.
+
+---
+
+## Bug Fixes (Our Fork)
+
+### 4. MossTTSNano: Fixed 2x Slow Speed
+
+**Commit:** `fd4271d` — Bugfix: MossTTSNanoModel fixed the 2x slow speed error
+
+Previously `MossTTSNanoModel` generated audio at half the intended speed due to an incorrect frame step in the SNAC decoder. Fixed in our fork and already merged.
+
+### 5. MossTTSNanoError: Surface Errors to Callers
+
+**Commit:** `4873b33` — Improve: MossTTSNanoError can surface the errors to callers now
+
+`MossTTSNanoError` now conforms to `LocalizedError` and surfaces descriptive messages to the TTS engine for display in the UI or logs.
+
+---
+
+## Risk Assessment
+
+| Change | Risk | Notes |
+|--------|------|-------|
+| MOSS-TTS Full Model | Medium | Large model; memory guard already in place |
+| Qwen3-ASR repetition fix | Low | Backward-compatible; critical fix for long audio |
+| Silero VAD | Low | New model type, isolated from existing VAD path |
+| MossTTSNano speed fix | None | Already in production since tag-20260502 |
+| MossTTSNanoError | None | Additive error surfacing only |
+
+**Overall upgrade risk: Low-Medium.** The Qwen3-ASR fix is urgently needed (prevents 22GB RAM stalls). MOSS-TTS Full is additive. Silero VAD is isolated.
