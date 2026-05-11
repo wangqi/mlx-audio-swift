@@ -353,6 +353,8 @@ public final class MossTTSModel: Module, SpeechGenerationModel, @unchecked Senda
     }
 
     private static func findCachedHubSnapshot(repo: String) -> URL? {
+        // homeDirectoryForCurrentUser is unavailable on iOS; HF hub cache only applies on macOS // wangqi modified 2026-05-09
+        #if os(macOS)
         let components = repo.split(separator: "/", maxSplits: 1).map(String.init)
         guard components.count == 2 else { return nil }
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -369,6 +371,9 @@ public final class MossTTSModel: Module, SpeechGenerationModel, @unchecked Senda
         return snapshots.sorted { $0.lastPathComponent > $1.lastPathComponent }.first {
             FileManager.default.fileExists(atPath: $0.appendingPathComponent("config.json").path)
         }
+        #else
+        return nil
+        #endif
     }
 
     private static func findLastEqual(_ values: MLXArray, target: Int) -> Int {
