@@ -144,10 +144,12 @@ public final class SparkModel: SpeechGenerationModel, @unchecked Sendable {
             let gender: SparkGender = (voice?.lowercased() == "male") ? .male : .female
             prompt = SparkPrompt.control(gender: gender, pitch: .moderate, speed: .moderate, text: text)
         }
-        let promptIds = tokenizer.encode(text: prompt, addSpecialTokens: false)
+        // Upstream made `encode` and `newCache` throwing in the tag-20260918 merge; same class of
+        // adaptation as `56770f3` for CSMModel's `makePromptCache`. // wangqi modified 2026-09-18
+        let promptIds = try tokenizer.encode(text: prompt, addSpecialTokens: false)
         let inputIds = MLXArray(promptIds.map { Int32($0) }).reshaped([1, promptIds.count])
 
-        let cache = backbone.newCache(parameters: generationParameters)
+        let cache = try backbone.newCache(parameters: generationParameters)
         let sampler = generationParameters.sampler()
         var processor = generationParameters.processor()
         processor?.prompt(MLXArray(promptIds.map { Int32($0) }))
