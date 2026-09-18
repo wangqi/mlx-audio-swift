@@ -114,7 +114,16 @@ public final class KokoroModel: Module, SpeechGenerationModel, @unchecked Sendab
     // MARK: - Tokenizer
 
     func tokenize(_ text: String) -> [Int] {
-        text.compactMap { config.vocab[String($0)] }
+        // Iterate Unicode scalars, not Characters. Swift's `for ch in String`
+        // returns extended grapheme clusters, which fuse combining marks into
+        // their base character. The IPA lexicon emits French nasal vowels as
+        // base vowel + U+0303 COMBINING TILDE (e.g. "ɔ" + "̃"), which Swift
+        // collapses into a single Character "ɔ̃" that isn't in `config.vocab`
+        // — so `compactMap` silently drops the entire nasal vowel and
+        // "bonjour" comes out as "bjour". Iterating scalars preserves the
+        // base + combining pair as two separate tokens, both of which exist
+        // in the vocab. See https://github.com/Blaizzy/mlx-audio-swift/issues/187
+        text.unicodeScalars.compactMap { config.vocab[String($0)] }
     }
 
     // MARK: - SpeechGenerationModel
@@ -127,6 +136,42 @@ public final class KokoroModel: Module, SpeechGenerationModel, @unchecked Sendab
         language: String?,
         generationParameters: GenerateParameters
     ) async throws -> MLXArray {
+        try await generateWithDurations(
+            text: text, voice: voice, refAudio: refAudio, refText: refText,
+            language: language, generationParameters: generationParameters
+        ).audio
+    }
+
+    /// `generate`, plus the per-phoneme durations the model already predicts.
+    ///
+    /// `callAsFunction` computes `predDur` on every synthesis and returns it,
+    /// but `generate` discards it — so callers doing lip-sync, subtitle
+    /// alignment or viseme animation have to re-derive timing from the
+    /// waveform, which is strictly less accurate than the alignment the model
+    /// used to produce that waveform in the first place.
+    ///
+    /// - Returns:
+    ///   - `audio`: identical to what `generate` returns.
+    ///   - `phonemes`: the phonemized string that was tokenized, so callers can
+    ///     line each duration up with the phoneme it belongs to.
+    ///   - `durations`: one entry per input token, in acoustic frames.
+    ///
+    /// Frames are converted to seconds without needing a hop-length constant:
+    /// the whole utterance spans `durations.sum()` frames and
+    /// `audio.count / sampleRate` seconds, so
+    /// `secondsPerFrame = (audio.count / sampleRate) / durations.sum()`.
+    ///
+    /// Note the token sequence is padded with a leading and trailing `0`
+    /// (see below), so `durations` is two longer than the phoneme count and
+    /// the first and last entries are the padding.
+    public func generateWithDurations(
+        text: String,
+        voice: String?,
+        refAudio: MLXArray?,
+        refText: String?,
+        language: String?,
+        generationParameters: GenerateParameters
+    ) async throws -> (audio: MLXArray, phonemes: String, durations: MLXArray) {
         let voiceName = voice ?? "af_heart"
         let voiceEmb: MLXArray
         if let refAudio {
@@ -165,9 +210,9 @@ public final class KokoroModel: Module, SpeechGenerationModel, @unchecked Sendab
         let refS = voiceEmb[refIdx..<(refIdx + 1)]
 
         try Task.checkCancellation()
-        let (audio, _) = self.callAsFunction(inputIds: inputIds, refS: refS, speed: speed)
+        let (audio, predDur) = self.callAsFunction(inputIds: inputIds, refS: refS, speed: speed)
         try Task.checkCancellation()
-        return audio.reshaped([-1])
+        return (audio.reshaped([-1]), phonemized, predDur)
     }
 
     public func generateStream(

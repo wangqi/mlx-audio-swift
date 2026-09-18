@@ -154,6 +154,27 @@ struct CodecsSmokeTests {
 @Suite("TTS Smoke Tests", .serialized)
 struct TTSSmokeTests {
 
+    @Test func sparkTTSGeneratesAudio() async throws {
+        testHeader("sparkTTSGeneratesAudio")
+        defer { testCleanup("sparkTTSGeneratesAudio") }
+        let model = try await TTS.loadModel(modelRepo: "mlx-community/Spark-TTS-0.5B-bf16")
+        #expect(model is SparkModel)
+
+        MLXRandom.seed(0)
+        let audio = try await model.generate(
+            text: "Hello world, this is a test.", voice: "female",
+            refAudio: nil, refText: nil, language: nil,
+            generationParameters: GenerateParameters(
+                maxTokens: 300, temperature: 0.8, topP: 0.95,
+                repetitionPenalty: 1.3, repetitionContextSize: 20))
+        eval(audio)
+
+        let samples = audio.asType(.float32).asArray(Float.self)
+        #expect(samples.count > 4000)
+        #expect(samples.allSatisfy { $0.isFinite })
+        #expect((samples.map { abs($0) }.max() ?? 0) > 0.01)
+    }
+
     @Test func qwen3Generate() async throws {
         testHeader("qwen3Generate")
         defer { testCleanup("qwen3Generate") }
@@ -225,6 +246,8 @@ struct TTSSmokeTests {
             case .audio(let audio):
                 finalAudio = audio
                 print("\u{001B}[32mReceived final audio: \(audio.shape)\u{001B}[0m")
+            case .progress(_):
+                break
             }
         }
 
@@ -312,6 +335,8 @@ struct TTSSmokeTests {
             case .audio(let audio):
                 finalAudio = audio
                 print("\u{001B}[32mReceived final audio: \(audio.shape)\u{001B}[0m")
+            case .progress(_):
+                break
             }
         }
 
@@ -421,6 +446,8 @@ struct TTSSmokeTests {
             case .audio(let audio):
                 finalAudio = audio
                 print("\u{001B}[32mReceived final audio: \(audio.shape)\u{001B}[0m")
+            case .progress(_):
+                break
             }
         }
 
@@ -494,7 +521,7 @@ struct TTSSmokeTests {
             case .info(let info):
                 generationInfo = info
                 print("\u{001B}[36mGeneration info: generateTime=\(info.generateTime)s\u{001B}[0m")
-            case .token(_):
+            case .token(_), .progress(_):
                 break
             }
         }
@@ -585,7 +612,7 @@ struct TTSSmokeTests {
                 print("\u{001B}[32mReceived audio chunk: \(audio.shape)\u{001B}[0m")
             case .info(let info):
                 print("\u{001B}[36mGeneration info: \(String(format: "%.2f", info.generateTime))s\u{001B}[0m")
-            case .token(_):
+            case .token(_), .progress(_):
                 break
             }
         }

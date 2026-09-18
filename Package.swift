@@ -104,6 +104,7 @@ let package = Package(
                 "MLXAudioG2P",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
+                .product(name: "MLXFFT", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
@@ -132,6 +133,7 @@ let package = Package(
             dependencies: [
                 "MLXAudioCore",
                 "MLXAudioCodecs",
+                "MLXAudioVAD",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
@@ -146,10 +148,13 @@ let package = Package(
                 "Models/FireRedASR2/README.md",
                 "Models/GLMASR/README.md",
                 "Models/GraniteSpeech/README.md",
+                "Models/MossTranscribeDiarize/README.md",
+                "Models/NemotronASR/README.md",
                 "Models/Parakeet/README.md",
                 "Models/Qwen3ASR/README.md",
                 "Models/SenseVoice/README.md",
                 "Models/VoxtralRealtime/README.md",
+                "Models/Whisper/README.md",
             ]
         ),
 
@@ -165,6 +170,7 @@ let package = Package(
             ],
             path: "Sources/MLXAudioVAD",
             exclude: [
+                "Models/SileroVAD/README.md",
                 "Models/SmartTurn/README.md",
                 "Models/Sortformer/README.md",
             ]
