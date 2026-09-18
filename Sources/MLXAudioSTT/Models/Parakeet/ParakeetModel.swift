@@ -322,7 +322,12 @@ public final class ParakeetModel: Module, STTGenerationModel {
             return compiled
         }
 
-        let compiled: @Sendable (MLXArray) -> MLXArray = compile { [self] features in
+        // mlx-swift-lm's CompileOverloads.swift (upstream PR #589, merged 2026-09-18) vends
+        // `compile` overloads whose body is `@Sendable`, and they win overload resolution over
+        // MLX.compile in any file that imports MLXLMCommon. This trace intentionally captures the
+        // encoder module, so it is qualified to keep MLX's unchecked overload.
+        // // wangqi modified 2026-09-18
+        let compiled: @Sendable (MLXArray) -> MLXArray = MLX.compile { [self] features in
             self.encoder(features).0
         }
         compiledEncoderFeaturesByShape[key] = compiled
@@ -904,7 +909,10 @@ private func makeCompiledTDTStep(
 
     let blankTokenArray = MLXArray(Int32(blankTokenId)).reshaped([1, 1])
 
-    return compile { arrays in
+    // Qualified for the same reason as compiledEncoderFeatures above: MLXLMCommon's @Sendable
+    // `compile` overloads shadow MLX's, and this trace captures the decoder/joint modules.
+    // // wangqi modified 2026-09-18
+    return MLX.compile { arrays in
         let feature = arrays[0]
         let currentToken = arrays[1]
         let hidden = arrays[2]
