@@ -242,15 +242,10 @@ public extension Mimi {
     ) async throws -> Mimi {
         print("[Mimi] Starting Mimi model loading from \(repoId)")
 
-        print("[Mimi] Creating configuration...")
-        let cfg = mimi_202407(numCodebooks: 32)
-
-        print("[Mimi] Initializing Mimi model with config...")
-        let modelInitStart = CFAbsoluteTimeGetCurrent()
-        let model = Mimi(cfg: cfg)
-        let modelInitTime = CFAbsoluteTimeGetCurrent() - modelInitStart
-        print(String(format: "[Mimi] Model initialization completed in %.2f seconds", modelInitTime))
-
+        // Model construction and weight loading moved into `fromWeightsFile(_:)` so a caller
+        // that already holds the weights file (Marvis, from its own model folder) can load it
+        // without this function's cache lookup and network fallback. Behaviour unchanged.
+        // wangqi modified 2026-09-29
         print("[Mimi] Downloading/snapshotting weights file...")
         let snapshotStart = CFAbsoluteTimeGetCurrent()
         guard let repoID = Repo.ID(rawValue: repoId) else {
@@ -289,6 +284,23 @@ public extension Mimi {
         }
         let snapshotTime = CFAbsoluteTimeGetCurrent() - snapshotStart
         print(String(format: "[Mimi] Weights file snapshot completed in %.2f seconds", snapshotTime))
+
+        return try fromWeightsFile(weightFileURL)
+    }
+
+    /// Build the Mimi codec from a local `tokenizer-e351c8d8-checkpoint125.safetensors`.
+    /// No cache lookup, no network. The tail of `fromPretrained`, split out so a model that ships
+    /// the codec inside its own folder can load it from there.
+    /// wangqi added 2026-09-29
+    static func fromWeightsFile(_ weightFileURL: URL) throws -> Mimi {
+        print("[Mimi] Creating configuration...")
+        let cfg = mimi_202407(numCodebooks: 32)
+
+        print("[Mimi] Initializing Mimi model with config...")
+        let modelInitStart = CFAbsoluteTimeGetCurrent()
+        let model = Mimi(cfg: cfg)
+        let modelInitTime = CFAbsoluteTimeGetCurrent() - modelInitStart
+        print(String(format: "[Mimi] Model initialization completed in %.2f seconds", modelInitTime))
 
         print("[Mimi] Loading weight arrays from safetensors file...")
         let loadStart = CFAbsoluteTimeGetCurrent()

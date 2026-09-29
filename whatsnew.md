@@ -1,253 +1,185 @@
-# mlx-audio-swift: What's New (tag-20260509 → tag-20260918)
+# mlx-audio-swift: What's New (tag-20260918 → tag-20260928)
 
-Merged upstream `Blaizzy/mlx-audio-swift` `main` into our fork on 2026-09-18
-(merge commit `8f3bd0e`). **50 commits** in range — 48 upstream, 2 local.
+Merged upstream `Blaizzy/mlx-audio-swift` `main` into our fork on 2026-09-29
+(merge commit `eb6369f`). **3 upstream commits** in range, no local commits, no conflicts.
 
-| | tag-20260509 | tag-20260918 |
+| | tag-20260918 | tag-20260928 |
 |---|---|---|
-| Swift files in `Sources/` | 261 | 320 |
-| Swift LOC in `Sources/` | 79,989 | 102,715 (+28%) |
-| Diffstat | | 120 files, +23,779 / −668 |
+| Head | `44979c9` (our Spark adaptation) | `eb6369f` (merge) |
+| Diffstat, `Sources/` | | 5 files, +299 / −46 |
+| Diffstat, `Tests/` | | 3 files, +375 / −8 |
+| Files touched outside `VoxtralRealtime/` | | **none** |
 
-One conflict, in `Sources/MLXAudioTTS/Models/MossTTS/MossTTSModel.swift` —
-resolved in upstream's favour. See [Our fork's patches](#our-forks-patches).
+The whole upgrade is one model family: **Voxtral Realtime** (`mistralai/Voxtral-Mini-4B-Realtime`
+and its MLX conversions), and within it mostly the **streaming session**. Every other STT, TTS,
+VAD, STS and codec source file is byte-identical to tag-20260918.
 
 ---
 
-## 1. New model families
+## 1. Changes
 
-### STT — 7 new families
+All three are memory/performance fixes for long-running Voxtral Realtime sessions, co-authored with
+Lucas Newman. Each one replaces work proportional to *stream length* with work proportional to the
+*step*.
 
-| Model | Commit | Notes |
+| Commit | What changed | Effect | Path affected |
+|---|---|---|---|
+| `ad9c2c4` (#263) | Stream session drops conv-stem rows below `encState.consumed` and adapter rows below `decPos` once they are consumed; `...Dropped` counters keep frame/decode indices absolute. `feedIncremental` gains a `startIndex:` parameter. `step()` stops buffering samples once the stream finished on EOS / `maxTokens`. | Upstream measured a 20-minute Voxtral Mini 4B stream on an M-series MacBook Pro still **growing ~23 MB of active memory per minute** after the decoder window filled. Retained rows are now bounded independently of stream length. | `VoxtralRealtimeStreamSession` only |
+| `0b55010` (#264) | `VoxtralRealtimeDecoderKVCache` goes from a value type holding exactly the sliding window (concatenate every token's K/V onto the whole window, then slice the oldest row off — in every layer) to a **class with preallocated storage grown in 256-row blocks**. New rows go in by slice update; out-of-window rows are compacted to row 0 in one move once a block has piled up. Index math lives in `VoxtralRealtimeDecoderKVCacheAppendPlan`, testable without Metal. | Removes a **full-window copy per token per layer** (8 192 rows/layer once the window fills on Mini 4B) and the transient doubling of cache memory that copy caused. | Decoder — **both** offline `generate` and streaming |
+| `01dec7c` (#265) | New `VoxtralRealtimeTranscriptText` appends each token's UTF-8 bytes incrementally (holding at most 3 bytes of an unfinished character) instead of re-decoding the whole token list and diffing the whole text every step. `decodeStreaming(_:)` → `streamingTokenBytes(_:)` (internal); tokenizer's `tokenBytes(for:)` goes from private to internal. | Per-step text cost is O(1) instead of O(transcript). Mattered for hour-long streams. `Delta.text` semantics unchanged. | `VoxtralRealtimeStreamSession` only |
+
+Test coverage added upstream: 64 random token sequences splitting multi-byte characters, combining
+marks, emoji and invalid bytes match a one-pass decode scalar-for-scalar; 2 000 plan appends and
+1 500 real-array appends match the old concatenate-then-trim exactly; a one-minute stream crossing
+the encoder window 47 times matches offline `generate` exactly.
+
+### What matters for iOS devices
+
+The pattern is the right one for iOS — on a phone the jetsam limit, not speed, ends a long session,
+and all three commits turn unbounded growth into a bounded working set. But **none of it reaches a
+Privacy AI user today**:
+
+- No Voxtral model is in `helper/mlxaudio_model*.json`, so nothing in the catalogue loads it.
+- Our live-mic path (`MLXAudioASR.startStreaming`) builds a `StreamingInferenceSession` for **Qwen3
+  only**; `VoxtralRealtimeStreamSession` is never constructed by the app.
+- The one code path that names Voxtral is `MLXAudioASR.loadCacheIgnoringModel` →
+  `VoxtralRealtimeModel.fromDirectory(_:)`, which is unchanged and only reached if a Voxtral repo is
+  ever added.
+
+So the value of this upgrade is **readiness**: if Voxtral Realtime is ever added as a live-dictation
+model, the streaming session is now viable for long sessions on a 6–8 GB device, where previously
+per-minute memory growth would have made a long dictation a jetsam candidate.
+
+---
+
+## 2. Public API
+
+| Symbol | Change | Our usage |
 |---|---|---|
-| **Whisper** (full family) | `0c71eba` (#192) | Every `openai/whisper-*` size and `.en` variant; both HF `transformers` and OpenAI/mlx-whisper checkpoint layouts. Quantized checkpoints fixed in `4b609fe` (#235). |
-| **Nemotron ASR** | `2766d9b` (#195) | NVIDIA streaming checkpoints, e.g. `mlx-community/nemotron-3.5-asr-streaming-0.6b-8bit`. Cache-aware streaming (`417df21` #196), incremental `NemotronASRStreamSession` for live mic (`bd9669f` #208), English streaming checkpoints (`3a25c7e` #236). |
-| **MOSS-Transcribe-Diarize** | `d17a0ed` (#221) | Audio-conditioned Qwen3 decoder + Whisper encoder — timestamped transcription **with speaker labels in one pass**. Opt-in quantized KV cache for memory-bounded long-form (`c5d4054` #225). |
-| **Canary** | `580e952` (#215) | NVIDIA Canary. |
-| **Moonshine** | `580e952` (#215) | Useful Sensors Moonshine — small, low-latency. |
-| **Wav2Vec2 CTC / MMS** | `580e952` (#215) | Massively Multilingual Speech CTC heads. |
-| **LASR CTC** | `580e952` (#215) | |
+| `VoxtralRealtimeStreamSession.text` | Same signature; now backed by `transcript.text`. Doc now notes reading it costs O(length) — prefer `Delta.text`. | Not used |
+| `VoxtralRealtimeStreamSession.step(_:)` | Returns an empty `Delta` after the stream has finished (previously appended samples and advanced to an empty result). | Not used |
+| `VoxtralRealtimeModel.decodeStreaming(_:)` | Removed → `streamingTokenBytes(_:)`. Both **internal**. | Not used |
+| `VoxtralRealtimeDecoderKVCache` | `struct` → `final class`. **Internal**. | Not used |
+| `VoxtralRealtimeModel.fromDirectory(_:)` | Unchanged | `MLXAudioASR.swift:264` |
 
-### TTS — 5 new families
-
-| Model | Commit | Notes |
-|---|---|---|
-| **OmniVoice** | `3cfa972` (#209) | Multilingual zero-shot TTS: bidirectional diffusion LM over a Qwen3 backbone, 9 RVQ codebooks @ 24 kHz, HiggsAudioV2 codec. Voice cloning on both fp32 and bf16 weights (`0ea78a5` #213). Adds reproducible seed (`3777187` #233), task cancellation (`898aedf` #227), and per-step denoise progress (`4266f98` #219). |
-| **Spark-TTS** | `3e97855` (#261) | Qwen2 LM emitting BiCodec semantic + global tokens → 16 kHz. Controllable gender/pitch/speed **and** voice cloning via the full BiCodec encode path. |
-| **IndexTTS** | `a011c35` (#220) | With its own BigVGAN vocoder. |
-| **Irodori-TTS** | `26bffa6` (#206) | Japanese flow-matching (Echo-TTS family), Rectified-Flow DiT @ 48 kHz. **VoiceDesign** — voice described by a Japanese caption instead of a reference clip. |
-| **Breeze TTS 2** | `d20cbd6` (#255) | Bilingual EN/ZH, natural-language voice design + zero-shot cloning. BF16 / 8-bit / 4-bit checkpoints. |
-
-### VAD / codecs
-
-- **FSMN VAD** (`72f2f07` #214).
-- **`SpeechSegmenter`** — reusable speech segmenter for VAD pre-processing (`c587280` #178), wired into Cohere Transcribe as a Silero VAD pre-processor (`2f3c3ed` #177).
-- **Codec parity with Python mlx-audio** (`72f2f07` #214): HiggsAudio tokenizer, StepAudio2. `MossAudioTokenizer`, `S3Tokenizer`, and the `S3Gen` stack (CAMPPlus, ConformerEncoder, FlowMatching, HiFTGenerator, S3GenMel) moved out of `MLXAudioTTS/Models/Chatterbox/` into shared `MLXAudioCodecs/`.
+No `public` declaration was added, removed or changed in signature. No new `#if os(...)` and no
+new platform-only API.
 
 ---
 
-## 2. Performance — what matters on device
+## 3. Our fork's patches
 
-Ordered by relevance to models **we currently ship**.
-
-| Change | Commit | Impact |
-|---|---|---|
-| **Sortformer: single bulk GPU→CPU readback in `predsToSegments`** | `d2035cd` (#193) | **~1.8× faster streaming diarization.** Replaces a per-frame `.item()` round-trip loop with one `asArray` readback. We ship `diar_streaming_sortformer_4spk-v2.1-fp16`, so this lands directly on `MLXAudioDiarizer`. Output is provably identical (verified below). |
-| **Qwen3 text attention via `attentionWithCacheUpdate`** | `542fffa` (#228) | Fewer graph nodes per decode step on the Qwen3 TTS backbone. We ship two Qwen3-TTS models. |
-| Voxtral Realtime: incremental mel/conv front end | `3fa0303` (#230) | **O(N²) → O(N) per utterance.** Not shipped by us, but the pattern matters if we ever enable Voxtral streaming. |
-| Voxtral Realtime: stop clearing the Metal buffer pool every step | `25ef620` (#229) | Removes a per-step allocator stall. |
-| Voxtral Realtime: hoist per-layer-invariant attention inputs out of layer loops | `6ea59e5` (#231) | |
-| Voxtral Realtime: fix float32 leak in streaming | `3b0b114` (#226) | Memory regression fix — relevant class of bug for any long-running on-device session. |
-| MOSS-Transcribe-Diarize: opt-in quantized KV cache | `c5d4054` (#225) | Bounded memory on long-form audio. Exposed generically as `STTGenerateParameters(kvBits:kvGroupSize:quantizedKVStart:)`. |
-| Fish Speech: stream progressively | `12b32ff` (#237) | Lower time-to-first-audio. |
+All **26** `wangqi modified` markers in `Sources/` survive — none of them are in
+`VoxtralRealtime/`, so the merge could not touch them. The previous local commit (`44979c9`, adapt
+`SparkModel` to the throwing `encode` / `newCache` APIs) is the base of this range and is intact.
 
 ---
 
-## 3. Correctness fixes — iOS-affecting
+## 4. Risk assessment
 
-Two of these fix bugs we were exposed to.
-
-- **`b917ab5` (#256) — STT: scale fbank input to int16 unconditionally in FireRedASR2 / SenseVoice.**
-  **This fixes a real iOS bug we could hit.** The old code auto-detected scale with
-  `if amplitude <= 1.0 { waveform *= 32768 }`. Lossy decoders — AAC via AVFoundation —
-  overshoot past 1.0 on clipped content, which flipped the branch, skipped the scaling
-  the Kaldi fbank recipe and CMVN stats expect, and **silently collapsed decoding to
-  empty segments on iOS**. Now unconditional, matching sherpa-onnx's hard-coded
-  `normalize_samples = false`. We ship `SenseVoiceSmall`.
-
-- **`bf14ae0` (#247) — Qwen3-ASR mel frontend: Slaney mel scale + periodic Hann window.**
-  Now byte-matches transformers' `WhisperFeatureExtractor`. `hanningWindow` gained a
-  `periodic:` parameter and `melSpectrogram` a `melScale:` parameter, both defaulted to
-  the legacy values so every other front end is untouched. **Transcription output for
-  `Qwen3-ASR-0.6B-4bit` will change slightly — in the accuracy-positive direction.**
-
-- **`63f33f5` (#189) — MossTTS: gate `homeDirectoryForCurrentUser` behind `#if os(macOS)`.**
-  Upstream independently landed the same fix we carried locally. Superseded three
-  commits later; see below.
-
-- **`3f6b055` (#186) — Qwen3-TTS CustomVoice voice parsing.** `voice` is now parsed as
-  `"speaker, instruction"`. Our seven CustomVoice speaker names contain no commas, so
-  behaviour is unchanged and the instruction half is a new capability.
-
-- **`10b7366` (#204) — Kokoro: iterate `unicodeScalars` in `tokenize`.** Swift's
-  `for ch in String` fuses combining marks into grapheme clusters, so French nasal
-  vowels (base vowel + U+0303) were dropped entirely — "bonjour" came out "bjour".
-
-- **`3032ccc` (#234) — Honor Chatterbox emotion override with default conditioning.**
-  We ship Chatterbox Turbo but never set an override, so no change for us today.
-
-- **`3506fb9` (#253)** FireRedASR2 beam-search topK gathering across rows;
-  **`856e04a` (#188)** FireRedASR2 hides CMVN runtime arrays from strict-verify reflection;
-  **`8ed8188` (#232)** VoxtralRealtime loads checkpoints with a quantized tied embedding;
-  **`4b609fe` (#235)** quantized Whisper checkpoints load correctly.
-
----
-
-## 4. Architectural changes
-
-- **`416f08c` (#197/#198) — shared NeMo-family module.** `ParakeetAttention`,
-  `ParakeetRNNTLayers`, `ParakeetDecodingLogic`, `ParakeetAlignment` moved to
-  `Models/Nemo/` as `Nemo*`, decoupling NemotronASR from Parakeet. Upstream ships
-  `ParakeetNemoAliases.swift`, so **every `Parakeet*` symbol still resolves**.
-
-- **`StreamingInferenceSession` refactored into a facade** over a
-  `StreamingInferenceSessionCore` protocol with three cores (Qwen, Cohere, MOSS).
-  A new `init(model: any STTGenerationModel, config:)` picks the core automatically.
-  **The Qwen decode path is a byte-identical extraction** — diffing the old class body
-  against `QwenStreamingInferenceSessionCore` yields only the class rename and
-  access-modifier changes.
-
-- **New `STT.loadModel(modelRepo:cache:)` / `STT.loadModel(modelRepo:modelType:cache:)`**
-  — a first-party STT dispatch table covering all 16 STT families, mirroring
-  `TTS.loadModel`.
-
-- **`AudioGeneration` gained `case progress(Double)`** — exact fractional progress from
-  models with a deterministic step count (diffusion denoise steps).
-
-- **`StreamingConfig.language` became `String?`** (`nil` = model default/auto). The only
-  source-breaking public change in the range; our call site uses the default.
-
-- **`MLXAudioSTT` now depends on `MLXAudioVAD`**, and `MLXAudioTTS` on `MLXFFT` from
-  mlx-swift. Our `thirdparty/mlx-swift` fork already vends `MLXFFT`.
-
----
-
-## 5. Our fork's patches
-
-All **26** `wangqi modified` markers survive the merge. The five
-`Tokenizers.Tokenizer` disambiguation patches remain attached to their declarations —
-including the one in `StreamingInferenceSession.swift`, which moved from line 567 to
-1464 during the refactor and still guards the right parameter.
-
-**The one conflict**, in `MossTTSModel.swift`, was our `#if os(macOS)` gate around
-`findCachedHubSnapshot`. Upstream landed the identical fix themselves in `63f33f5`
-(#189), then **deleted the entire function** in `50860ee` (#207), replacing the
-hand-rolled `~/.cache/huggingface/hub` scan with `HubCache` + `hfToken` threaded
-through `fromPretrained` / `fromModelDirectory`.
-
-Resolved in upstream's favour. Nothing is lost:
-
-- `homeDirectoryForCurrentUser` now appears **nowhere** in the package, so the iOS
-  compile error our patch prevented cannot recur.
-- The local-directory probe we relied on moved *into*
-  `MLXMossAudioTokenizer.fromPretrained`, which still checks a tilde-expanded
-  `config.json` before any network call.
-
-Two local commits are also in range: `5c645df` (the original macOS fix, now superseded)
-and `56770f3` (adapt `CSMModel` to the now-throwing `makePromptCache`).
-
----
-
-## 6. Risk assessment
-
-### Low risk — verified
+### Low — verified by inspection
 
 | Area | Finding |
 |---|---|
-| **Compilation** | `swift build` on the merged package: **passed**, exit 0. |
-| **Public API** | Every removed `public` declaration is a *relocation*, not a deletion. All nine model types our app names still resolve; every `fromPretrained(_:cache:)` we call is intact. |
-| **Exhaustive switches** | `AudioGeneration` gained a case, but our `toSamplesStream()` uses `if case .audio(…)` — a pattern match, not an exhaustive switch. `STTGeneration` and `TranscriptionEvent` are unchanged, so our exhaustive switches over those still compile. |
-| **TTS model routing** | `inferModelType` gained breeze/spark/irodori/omnivoice/indextts checks, three of them *prepended*. **None of our 8 shipped TTS repo names contain those substrings**, and existing ordering is untouched. MOSS-TTS-Nano still resolves to `moss_tts_nano`. |
-| **Qwen3 streaming ASR** | Byte-identical extraction. Zero behavioural change. |
-| **Sortformer rewrite** | Semantically equivalent: the trailing `if segStart >= 0` correctly replaces the old zero-pad/diff trick, and the float32 widening from fp16 is exact. |
-| **BigVGAN `beta` → optional** | `BigVGANPeriodicActivation` has no consumers anywhere in the tree. Chatterbox's Snake is HiFTGenerator's, not this one. |
-| **Platform safety** | No macOS-only API anywhere in `Sources/`, and upstream introduced **no new platform conditionals**. |
+| **Blast radius** | 5 source files, all under `Sources/MLXAudioSTT/Models/VoxtralRealtime/`. All 17 rows in `helper/mlxaudio_model.json` — TTS (Soprano, Pocket TTS, Qwen3-TTS ×2, VyvoTTS, Marvis, Chatterbox Turbo, MOSS-TTS-Nano), STT (Qwen3-ASR, Parakeet TDT v3, GLM-ASR-Nano, SenseVoice, Granite Speech, Nemotron streaming), Sortformer diarization, Smart Turn v3 and DeepFilterNet v3 — compile from byte-identical sources. **Zero output drift is possible on shipped models.** |
+| **Package compilation** | `swift build --target MLXAudioSTT` on the merged package (macOS host): **passed**, exit 0. |
+| **App compilation** | Our only Voxtral call site, `VoxtralRealtimeModel.fromDirectory`, is unchanged. No public API moved, so `libs/audio/mlxaudio/*.swift` needs no edit. |
+| **Binary size** | +1 file (`VoxtralRealtimeTranscriptText.swift`, 84 lines). Negligible. |
+| **Platform safety** | No platform conditionals added; only `MLXArray.zeros` / slice updates, available everywhere MLX is. |
 
-### Medium risk — accept, but watch
+### Medium — only if Voxtral is ever enabled
 
-1. **Binary size. The largest practical iOS risk.** +22,726 Swift LOC (+28%), 59 new
-   files, 12 new model families — all statically linked into the app whether or not a
-   user downloads those weights. Worth measuring the `.ipa` delta on the next archive
-   before submission.
+1. **KV cache aliasing.** The decoder cache is now a reference type mutated in place by `append`.
+   Upstream's decoder passes each cache forward and never keeps an older one, but any future caller
+   that snapshots `[VoxtralRealtimeDecoderKVCache?]` to rewind or branch a decode (as prompt
+   caching does in the LLM stack) would silently share state. The type is internal, so this can
+   only bite from inside the package.
 
-2. **Output drift on two shipped STT models.** Qwen3-ASR (#247) and SenseVoice (#256)
-   will produce different text than before. Both changes are corrections toward the
-   Python reference, but any transcription golden-file tests need re-baselining.
+2. **In-place update relies on MLX buffer uniqueness.** The doc comment warns that holding `keys` /
+   `values` across an `append` makes MLX copy the whole storage. That is a performance cliff, not
+   a correctness bug — but it is invisible, and it would undo #264's win without failing a test.
 
-3. **MOSS-TTS-Nano audio-tokenizer cache location moved.** `fromPretrained` now threads
-   our `HubCache` into the audio-tokenizer fetch instead of using `.default`. In
-   practice `ensureAudioTokenizer` checks the bundled `audio_tokenizer/` subfolder
-   first, which `mlx-community/MOSS-TTS-Nano-100M` ships — so the network path is
-   almost certainly never reached. If it ever is, expect one re-download into the app's
-   models directory (which is the better location anyway).
+3. **Storage capacity steps.** Capacity grows in 256-row blocks and compacts when a block of
+   out-of-window rows piles up, so resident cache memory is roughly `slidingWindow + 256` rows per
+   layer rather than exactly `slidingWindow`. Up to ~3% extra at an 8 192-row window — in exchange
+   for no longer transiently holding two full copies during every append.
 
-### Resolved since this document was first written
+### High
 
-**The app now builds on both destinations.** The `Multiple commands produce
-'…/include/module.modulemap'` collision between FluidAudio's `NemoTextProcessing.xcframework` and
-SwiftGit2's `libgit2.xcframework` fired at build-*planning* time and was never caused by this
-merge; it is fixed. So the caveat that used to sit here — that the app-level compile of
-`libs/audio/mlxaudio/*.swift` had been verified by API inspection rather than by the compiler — no
-longer applies. Both `AIAssistant` and `AIAssistantMac` compile against the merged package.
-
-**And it is no longer verified by compilation alone.**
-`helper/scripts/model_regression/run_audio_tests.py` now loads and exercises every catalogue model
-through the app's own wrappers on macOS and records a baseline that the next upgrade can
-`--compare` against (see `helper/docs/mlx-audio-swift.md` §4.13). That is what closes item 2 under
-*Medium risk* above: the output drift on Qwen3-ASR (#247) and SenseVoice (#256) is now measured and
-recorded per model rather than assumed.
-
-Building the gate also turned up a defect this document did not predict. `MLXAudioASR.makeSTTModel`
-dispatched on six repo-name substrings and **fell through to `Qwen3ASRModel` for everything else**,
-so every one of the seven new STT families would have loaded the wrong architecture rather than
-failing. It now routes through `STT.loadModel`, which throws on an unknown repo. Note that
-`STT.loadModel` is not a drop-in: five of its branches construct through a `fromPretrained` that
-ignores the `HubCache` argument, which would have re-downloaded models outside app storage — see
-§2.3 of the developer guide.
+None.
 
 ---
 
-## 7. Integration opportunities for `libs/audio/mlxaudio/`
+## 5. Verification — every catalogue model, through the app's own wrappers
 
-No changes are *required*. Three are worth making — see
-`helper/docs/` follow-ups and the notes in `MLXAudioASR.swift`.
+`helper/scripts/model_regression/run_audio_tests.py` on macOS, 2026-09-29, against weights
+downloaded from the mirror `flyingfishinwater/mlxaudiomodels` (all 171 files verified byte-identical
+to the mirror by sha256 / git blob hash). Swift suite:
+`testcases/engines/mlxaudio/MLXAudioCatalogueRegressionTests.swift`.
+Report: `/Volumes/ssd2t/modeltests/reports/audio-20260929-115552.md`.
 
-1. **`cancelStreaming()` should call `session.cancel()`, not `session.stop()`.**
-   `stop()` awaits the in-flight decode, flushes the mel processor, encodes remaining
-   windows and runs a **final decode pass** to emit `.ended`. On a user-initiated
-   cancel that is pure wasted GPU work on-device, and we discard the result anyway —
-   `cancelStreaming()` already finishes its own continuation first. `cancel()` tears
-   down `decodeTask`/`stopTask`, resets the encoder and mel processor, and returns.
-   (`cancel()` predates this upgrade; the mismatch is pre-existing.)
+**17 passed, 0 failed, 0 skipped.**
 
-2. **Replace the private `makeSTTModel` dispatch with `STT.loadModel(modelRepo:cache:)`.**
-   Our chain is 6 hand-written `lower.contains(…)` branches whose `else` falls through
-   to Qwen3 — so an unrecognised repo silently loads as the wrong architecture instead
-   of erroring. `STT.inferModelType` correctly classifies all five STT repos we ship
-   and covers 16 families, throwing `STTModelError.unsupportedModelType` otherwise. It
-   also removes our two special cases (Cohere's `fromDirectory` workaround, and the
-   comment explaining why VoxtralRealtime is excluded), since upstream handles both.
-   **Caveat:** the 2-argument form calls `ModelUtils.resolveModelType`, which may hit
-   the network for a model type it cannot resolve locally. Prefer the 3-argument
-   `loadModel(modelRepo:modelType:cache:)` form to stay strictly offline.
+| Type | Model | Engine class | Result |
+|---|---|---|---|
+| stt | Qwen3-ASR 0.6B 4bit | `Qwen3ASRModel` | similarity 0.909 (= baseline) |
+| stt | Nemotron ASR streaming 0.6B 8bit | `NemotronASRModel` | 0.818 (= baseline) |
+| stt | SenseVoice Small | `SenseVoiceModel` | 0.909 (= baseline) |
+| stt | GLM-ASR Nano 4bit | `GLMASRModel` | 1.0 (= baseline) |
+| stt | Granite Speech 1B 4bit | `GraniteSpeechModel` | 1.0 (= baseline) |
+| stt | Parakeet TDT 0.6B v3 | `ParakeetModel` | 1.0 (= baseline) |
+| tts | Soprano 1.1 80M | `SopranoModel` | audio produced |
+| tts | Pocket TTS | `PocketTTSModel` | audio produced |
+| tts | MOSS-TTS-Nano 100M | `MossTTSNanoModel` | audio produced (cloned voice) |
+| tts | Marvis TTS 250M | `MarvisTTSModel` | audio produced |
+| tts | Chatterbox Turbo 4bit | `ChatterboxModel` | audio produced |
+| tts | VyvoTTS EN 4bit | `Qwen3Model` | audio produced |
+| tts | Qwen3-TTS 0.6B Base 4bit | `Qwen3TTSModel` | audio produced |
+| tts | Qwen3-TTS 0.6B CustomVoice | `Qwen3TTSModel` | audio produced |
+| diarization | Sortformer 4spk | `SortformerModel` | 1 segment, 3.84 s speech |
+| vad | Smart Turn v3 | `SmartTurnModel` | endpoint detected |
+| sts | DeepFilterNet v3 | `DeepFilterNetModel` | length preserved |
 
-3. **`StreamingInferenceSession(model: any STTGenerationModel, config:)`** would let
-   `startStreaming` drop its `item.repo.lowercased().contains("qwen3")` check and
-   `as? Qwen3ASRModel` downcast. Note it is `preconditionFailure` — not `throw` — on an
-   unsupported model, so the app must keep gating on `item.supportsStreaming`
-   before constructing one.
+The 2026-09-18 baseline covered only the six STT rows (every other row skipped on the development
+Mac's iCloud Drive storage), so the other eleven had never been exercised by the gate before this
+run. Getting them green found three problems **unrelated to this upgrade**, recorded in
+`helper/docs/mlx-audio-swift.md` §4.14:
 
-Also available, not currently needed: `STTGenerateParameters(kvBits:)` for
-memory-bounded long-form transcription, `SpeechSegmenter` for VAD pre-processing,
-`KokoroModel.generateWithDurations` for per-phoneme timing (we use the Core AI /
-sherpa Kokoro paths instead), and `AudioPlayer.unloadAudio()`.
+1. **DeepFilterNet could never load in the app** — `ModelUtils.resolveOrDownloadModel` only looks
+   for top-level weights, deleted the install and re-downloaded from upstream. Fixed in
+   `MLXAudioSTS.loadModel` (loads through `DeepFilterNetModel.fromLocal`).
+2. **The bundle-fallback catalogue decode dropped every snake_case field** (`loader_repo`,
+   `model_type`, …) because of `.convertFromSnakeCase`. Fixed in both bundle loaders; covered by
+   `MLXAudioCatalogueSchemaTests`.
+3. **Marvis and MOSS-TTS-Nano fetched a second repository from upstream on first use** (the Mimi
+   codec, 385 MB; the MOSS audio tokenizer, 44 MB), which the mirror did not carry, so they needed
+   the network on first use and failed offline. Resolved: both now ship byte-identical inside their
+   model folders on the mirror (`codec/`, `audio_tokenizer/`), and Marvis loads the codec from
+   there through the new `Mimi.fromWeightsFile` (fork patch #4, `helper/docs/mlx-audio-swift.md` §6).
+
+Issues 1 and 2 were also reworked after review (DeepFilterNet loads by item through the shared
+`ensure_file_ready` gate; FluidAudio's two bundle loaders had the same decode bug and are fixed too).
+The gate now FAILs any row that writes outside its own folder and runs a cloned-voice pass for every
+voice-cloning row. Re-run the same day: report `/Volumes/ssd2t/modeltests/reports/audio-20260929-143301.md`,
+**17 passed, 0 failed, 0 skipped**, identical to the run above under `--compare`; Pocket TTS, Marvis,
+Chatterbox and both Qwen3-TTS pass both the default and the cloned voice, MOSS-TTS-Nano its cloned
+voice. With `codec/` moved out of the staged Marvis folder the row FAILs "fetches
+`kyutai_moshiko-pytorch-bf16` from outside the mirror at first use", as intended.
+
+---
+
+## 6. Integration opportunities for `libs/audio/mlxaudio/`
+
+**No changes are required, and none are worth making now.** This range adds no new API that our
+shipped models can use, and it does not touch any code path the app runs.
+
+If Voxtral Realtime is added to the catalogue later:
+
+- It already loads through `loadCacheIgnoringModel` (`fromDirectory`, app storage, no second
+  download) for batch transcription, and offline `generate` benefits from #264 automatically.
+- Live dictation would need a second branch in `startStreaming`: today it downcasts to
+  `Qwen3ASRModel` for `StreamingInferenceSession`. Voxtral's streaming entry point is its own
+  `VoxtralRealtimeStreamSession(model:…)` driven by `step(_:)` / `finish()`; consume `Delta.text`
+  per step rather than reading `.text`, which is now documented as O(length).
+- Run it through `helper/scripts/model_regression/run_audio_tests.py` before shipping, as for any
+  new row.

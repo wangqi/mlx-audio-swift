@@ -184,7 +184,22 @@ public extension MarvisTTSModel {
         let args = try JSONDecoder().decode(CSMModelArgs.self, from: Data(contentsOf: configFileURL))
 
         let textTokenizer = try await AutoTokenizer.from(modelFolder: modelDirectoryURL)
-        let codec = try await Mimi.fromPretrained(cache: cache, progressHandler: progressHandler)
+        // The Mimi codec ships inside the model folder on the app's mirror (`codec/`), so the
+        // model downloads in one job and loads offline. Without it, fall back to the upstream
+        // kyutai/moshiko-pytorch-bf16 fetch, which needs the network on first use.
+        // `marvisLoadWeights` reads top-level files only, so `codec/` never reaches the LM.
+        // wangqi modified 2026-09-29
+        let bundledCodecURL = modelDirectoryURL
+            .appendingPathComponent("codec")
+            .appendingPathComponent("tokenizer-e351c8d8-checkpoint125.safetensors")
+        let codec: Mimi
+        if FileManager.default.fileExists(atPath: bundledCodecURL.path) {
+            print("[Marvis] Mimi codec from model folder: \(bundledCodecURL.path)")
+            codec = try Mimi.fromWeightsFile(bundledCodecURL)
+        } else {
+            print("[Marvis] no codec/ in model folder; falling back to kyutai/moshiko-pytorch-bf16 (network on first use)")
+            codec = try await Mimi.fromPretrained(cache: cache, progressHandler: progressHandler)
+        }
         let audioTokenizer = MimiTokenizer(codec)
         let model = MarvisTTSModel(
             config: args,
