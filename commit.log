@@ -1,1067 +1,151 @@
-commit eb6369fc3d96d91777c9e0404b290f211dcf2439
-Merge: 44979c9 01dec7c
-Author: wangqi <wang.qi@qikuyx.com>
-Date:   Tue Sep 29 10:00:26 2026 -0400
+commit 244458d7b61e54ff135073ddc9ed76782bb20758
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Sat Oct 10 16:07:35 2026 -0700
 
-    Merge remote-tracking branch 'refs/remotes/origin/main'
+    Fix parallel test runner. (#282)
 
-commit 01dec7c9bdce3088a6b6b7ab9f2e403458195efb
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Fri Sep 18 21:45:42 2026 +0200
+commit a0bd39c923e1359d5deb3d049c89fa5585cf479a
+Author: Shraey Bhatia <shraeybhatia@gmail.com>
+Date:   Sat Oct 10 10:58:09 2026 +1100
 
-    VoxtralRealtime streaming: decode the transcript one token at a time (#265)
+    Add VoxCPM2 TTS model (2B params, 48kHz, voice cloning) (#175)
     
-    After every step the stream session decoded its whole token list back to
-    text and compared that text with the previous one. Both cost time
-    proportional to the transcript, so a session streaming for hours slowed
-    down on every step for reasons unrelated to the audio.
+    * Add VoxCPM2 TTS model (2B params, 48kHz, voice cloning)
     
-    `VoxtralRealtimeTranscriptText` appends each kept token's bytes as the
-    token is decoded. It keeps the finished text plus the first bytes of a
-    character whose remaining bytes have not arrived, at most three. Bytes only
-    move into the finished text where a one-pass UTF-8 decoder has finished a
-    character, so `text` stays equal to decoding every byte at once,
-    replacement characters included.
+    Autoregressive MiniCPM backbone + CFM diffusion + AudioVAE decoder.
+    Ported from mlx-audio Python voxcpm2 implementation with:
+    - Config-driven generation constants (inferenceTimesteps, cfgScale)
+    - Resilient Codable decoding with defaults for all config structs
+    - 48kHz→16kHz resampling for encoder input
+    - BOS/EOS stripping in tokenizer to match upstream Python behavior
+    - Proper weight sanitization (snake_case→camelCase, RoPE buffers)
+    - Smoke tests for generate and stream paths
     
-    The step's `Delta.text` keeps its old meaning: the new suffix when the old
-    transcript is a prefix of the new one, the whole transcript otherwise. Only
-    the last finished character and what follows it can compare differently, so
-    only that tail is compared.
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
     
-    `decodeStreaming(_:)` gives way to `streamingTokenBytes(_:)`, and the
-    tokenizer's per-token byte lookup becomes internal.
+    * Fix build error, warnings, and add model README
     
-    Tests: over 64 random sequences of tokens that split two-, three- and
-    four-byte characters, combine accents and emoji, or carry invalid bytes,
-    `text` matches a one-pass decode scalar for scalar and every delta matches
-    the whole-transcript comparison. End to end, a 20-second stream with such a
-    vocabulary produces exactly offline `generate`'s transcript.
-
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtime.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtime.swift
-index 921b079..8df148c 100644
---- a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtime.swift
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtime.swift
-@@ -462,10 +462,10 @@ extension VoxtralRealtimeModel {
-         )
-     }
- 
--    /// Token-id → text seam for the streaming session (which lives in another file
-+    /// Token-id → bytes seam for the streaming session (which lives in another file
-     /// and cannot reach the private `tokenizer`).
--    func decodeStreaming(_ tokenIds: [Int]) -> String {
--        tokenizer?.decode(tokenIds: tokenIds) ?? ""
-+    func streamingTokenBytes(_ tokenId: Int) -> [UInt8] {
-+        tokenizer?.tokenBytes(for: tokenId) ?? []
-     }
- 
-     func sample(logits: MLXArray, temperature: Float) -> Int {
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-index e833dc5..c6268cb 100644
---- a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-@@ -106,7 +106,7 @@ public final class VoxtralRealtimeStreamSession {
-     private var done = false
- 
-     private var generated: [Int] = []
--    private var emittedText = ""
-+    private var transcript = VoxtralRealtimeTranscriptText()
- 
-     public init(
-         model: VoxtralRealtimeModel,
-@@ -123,8 +123,9 @@ public final class VoxtralRealtimeStreamSession {
-         )
-     }
- 
--    /// Full transcript decoded so far.
--    public var text: String { emittedText }
-+    /// Full transcript decoded so far. Reading it can cost time proportional to its
-+    /// length, so hosts that only need each step's new text should use `Delta.text`.
-+    public var text: String { transcript.text }
-     /// Token ids decoded so far (EOS stripped).
-     public var tokens: [Int] { generated }
-     /// Whether the stream has emitted EOS / hit maxTokens.
-@@ -314,6 +315,7 @@ public final class VoxtralRealtimeStreamSession {
-     private func decode(adapter: MLXArray, upTo emitLimit: Int) -> Delta {
-         guard prefilled else { return Delta(text: "", tokenIds: []) }
- 
-+        let deltaStart = transcript.mark
-         var newIds: [Int] = []
-         // Mirrors the offline `generate` loop exactly (append → check → pop trailing
-         // EOS) so the streamed token stream is identical at temperature 0.
-@@ -321,6 +323,10 @@ public final class VoxtralRealtimeStreamSession {
-             guard let logits = lastLogits else { break }
-             let token = model.sample(logits: logits, temperature: temperature)
-             generated.append(token)
-+            // Only a trailing EOS is left out of the text, as in `generated`.
-+            if token != model.config.eosTokenId {
-+                transcript.append(model.streamingTokenBytes(token))
-+            }
- 
-             if token == model.config.eosTokenId || generated.count > maxTokens {
-                 done = true
-@@ -348,15 +354,7 @@ public final class VoxtralRealtimeStreamSession {
-             }
-         }
- 
--        let textSoFar = model.decodeStreaming(generated)
--        let delta: String
--        if textSoFar.hasPrefix(emittedText) {
--            delta = String(textSoFar.dropFirst(emittedText.count))
--        } else {
--            delta = textSoFar
--        }
--        emittedText = textSoFar
--        return Delta(text: delta, tokenIds: newIds)
-+        return Delta(text: transcript.delta(since: deltaStart), tokenIds: newIds)
-     }
- }
- 
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTokenizer.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTokenizer.swift
-index 600f863..a91a6dd 100644
---- a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTokenizer.swift
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTokenizer.swift
-@@ -74,7 +74,9 @@ final class VoxtralRealtimeTokenizer {
-         return String(decoding: out, as: UTF8.self)
-     }
- 
--    private func tokenBytes(for tokenId: Int) -> [UInt8] {
-+    /// The bytes `decode(tokenIds:)` emits for one token: empty for special tokens and
-+    /// ids outside the vocabulary.
-+    func tokenBytes(for tokenId: Int) -> [UInt8] {
-         if let cached = bytesCache[tokenId] {
-             return cached
-         }
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTranscriptText.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTranscriptText.swift
-new file mode 100644
-index 0000000..ba186a4
---- /dev/null
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeTranscriptText.swift
-@@ -0,0 +1,84 @@
-+import Foundation
-+
-+/// The transcript of a stream session, built from each token's bytes as the token is
-+/// decoded, so a step's cost does not grow with the transcript.
-+///
-+/// `text` always equals `String(decoding: allBytes, as: UTF8.self)`, replacement
-+/// characters included: bytes only move into `settled` where that decoder has finished
-+/// a character.
-+struct VoxtralRealtimeTranscriptText {
-+    /// Text no later byte can change.
-+    private(set) var settled = ""
-+    /// The start of a UTF-8 sequence whose remaining bytes have not arrived yet.
-+    private var unsettledBytes: [UInt8] = []
-+
-+    /// The whole transcript so far. While a character is incomplete it ends in U+FFFD,
-+    /// and reading it builds a new string as long as the transcript.
-+    var text: String {
-+        unsettledBytes.isEmpty ? settled : settled + unsettledText
-+    }
-+
-+    private var unsettledText: String {
-+        String(decoding: unsettledBytes, as: UTF8.self)
-+    }
-+
-+    mutating func append(_ bytes: [UInt8]) {
-+        guard !bytes.isEmpty else { return }
-+        let pending = unsettledBytes + bytes
-+        let cut = Self.unsettledSuffixStart(pending)
-+        settled += String(decoding: pending[..<cut], as: UTF8.self)
-+        unsettledBytes = Array(pending[cut...])
-+    }
-+
-+    /// Where the trailing unfinished UTF-8 sequence in `bytes` starts, or `bytes.count`
-+    /// when there is none. A lead byte always starts a new character, so a one-pass
-+    /// decoder has finished everything before it.
-+    static func unsettledSuffixStart(_ bytes: [UInt8]) -> Int {
-+        var leadIndex = bytes.count
-+        var continuationCount = 0
-+        while leadIndex > 0, continuationCount < 3, bytes[leadIndex - 1] & 0xC0 == 0x80 {
-+            leadIndex -= 1
-+            continuationCount += 1
-+        }
-+        guard leadIndex > 0 else { return bytes.count }
-+
-+        let expectedContinuations: Int
-+        switch bytes[leadIndex - 1] {
-+        case 0xC2...0xDF: expectedContinuations = 1
-+        case 0xE0...0xEF: expectedContinuations = 2
-+        case 0xF0...0xF4: expectedContinuations = 3
-+        default: return bytes.count  // ASCII, a stray continuation, or never valid
-+        }
-+        return continuationCount < expectedContinuations ? leadIndex - 1 : bytes.count
-+    }
-+
-+    /// A position in the transcript to measure the next delta from.
-+    struct Mark {
-+        fileprivate let settledUTF8Count: Int
-+        fileprivate let lastSettledCharacter: String
-+        fileprivate let unsettledText: String
-+    }
-+
-+    var mark: Mark {
-+        Mark(
-+            settledUTF8Count: settled.utf8.count,
-+            lastSettledCharacter: settled.last.map(String.init) ?? "",
-+            unsettledText: unsettledText
-+        )
-+    }
-+
-+    /// The text added since `mark`, or the whole transcript when the text at `mark` is
-+    /// no longer a prefix: a trailing U+FFFD became a real character, or new text
-+    /// combined with the last character. Only that last character and what follows can
-+    /// differ, so only that tail is compared.
-+    func delta(since mark: Mark) -> String {
-+        // `settled` only grows and ends on a scalar boundary, so the old count is a
-+        // valid index.
-+        let start = settled.utf8.index(settled.utf8.startIndex, offsetBy: mark.settledUTF8Count)
-+        let newlySettled = String(settled.unicodeScalars[start...])
-+        let oldTail = mark.lastSettledCharacter + mark.unsettledText
-+        let newTail = mark.lastSettledCharacter + newlySettled + unsettledText
-+        guard newTail.hasPrefix(oldTail) else { return text }
-+        return String(newTail.dropFirst(oldTail.count))
-+    }
-+}
-diff --git a/Tests/VoxtralRealtimeStreamingFrontEndTests.swift b/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-index a269e47..f2af871 100644
---- a/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-+++ b/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-@@ -328,6 +328,35 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-         #expect(session.tokens == tokensBefore)
-     }
- 
-+    /// With a vocabulary whose tokens split "é", "€" and "😀" into separate bytes, the
-+    /// transcript must still equal offline `generate`, which decodes in one pass.
-+    @Test func splitMultibyteTokensMatchOfflineTranscript() throws {
-+        // No whitespace tokens: `generate` trims its text and the session does not.
-+        let fixtureDir = try Self.makeRandomFixture(
-+            eosTokenId: 99,
-+            vocabBytes: [[0x61], [0xC3], [0xA9], [0xE2], [0x82, 0xAC], [0xF0, 0x9F], [0x98], [0x80]]
-+        )
-+        defer { try? FileManager.default.removeItem(at: fixtureDir) }
-+
-+        let model = try VoxtralRealtimeModel.fromDirectory(fixtureDir)
-+        let samples = Self.sweep(20 * 16_000)
-+        let params = STTGenerateParameters(maxTokens: 1_000, temperature: 0.0)
-+        let offline = model.generate(audio: MLXArray(samples), generationParameters: params)
-+
-+        let session = model.makeStreamSession(maxTokens: 1_000)
-+        for chunk in Self.chunked(samples) {
-+            _ = session.step(chunk)
-+        }
-+        _ = session.finish()
-+
-+        #expect(session.tokens.count == offline.generationTokens)
-+        #expect(Array(session.text.unicodeScalars) == Array(offline.text.unicodeScalars))
-+        #expect(
-+            session.text.unicodeScalars.contains { $0.value > 0x7F },
-+            "the vocabulary must actually produce non-ASCII text"
-+        )
-+    }
-+
-     /// finish() with no audio at all must still transcribe the zero-padded empty
-     /// stream, exactly like `generate` over an empty buffer.
-     @Test func emptyAudioFinishMatchesOffline() throws {
-@@ -349,12 +378,15 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-     /// weights so the decoded tokens actually depend on the conv-stem rows.
-     /// `encoderLayers` may be 0 (front end only) or 1 (exercises the encoder
-     /// transformer + sliding-window cache path too). An `eosTokenId` outside the
--    /// 8-token vocabulary keeps the decoder from ever ending the stream.
-+    /// 8-token vocabulary keeps the decoder from ever ending the stream. `vocabBytes`
-+    /// replaces the default "a" to "h" vocabulary and must also have 8 entries.
-     private static func makeRandomFixture(
-         transcriptionDelayMs: Int = 0,
-         encoderLayers: Int = 0,
--        eosTokenId: Int = 0
-+        eosTokenId: Int = 0,
-+        vocabBytes: [[UInt8]] = (0..<8).map { [UInt8(ascii: "a") + UInt8($0)] }
-     ) throws -> URL {
-+        precondition(vocabBytes.count == 8)
-         precondition((0...1).contains(encoderLayers))
-         let fixtureDir = FileManager.default.temporaryDirectory
-             .appendingPathComponent("voxtral-random-fixture-\(UUID().uuidString)")
-@@ -385,13 +417,12 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-         try configJSON.write(
-             to: fixtureDir.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
- 
-+        let vocabJSON = vocabBytes
-+            .map { #"{"token_bytes":"\#(Data($0).base64EncodedString())"}"# }
-+            .joined(separator: ",")
-         let tekkenJSON = """
-         {
--          "vocab": [
--            {"token_bytes":"YQ=="},{"token_bytes":"Yg=="},{"token_bytes":"Yw=="},
--            {"token_bytes":"ZA=="},{"token_bytes":"ZQ=="},{"token_bytes":"Zg=="},
--            {"token_bytes":"Zw=="},{"token_bytes":"aA=="}
--          ],
-+          "vocab": [\(vocabJSON)],
-           "config":{"default_num_special_tokens":0},"special_tokens":[]
-         }
-         """
-diff --git a/Tests/VoxtralRealtimeTranscriptTextTests.swift b/Tests/VoxtralRealtimeTranscriptTextTests.swift
-new file mode 100644
-index 0000000..c1e2591
---- /dev/null
-+++ b/Tests/VoxtralRealtimeTranscriptTextTests.swift
-@@ -0,0 +1,116 @@
-+//  The stream session's incremental transcript must read exactly like decoding every
-+//  token byte in one pass, and each step's delta must equal the one a comparison of
-+//  whole transcripts gives. No Metal needed.
-+//
-+//  Run:
-+//    xcodebuild test -scheme MLXAudio-Package -destination 'platform=macOS' \
-+//      -only-testing:'MLXAudioTests/VoxtralRealtimeTranscriptTextTests' \
-+//      CODE_SIGNING_ALLOWED=NO
-+
-+import Foundation
-+import Testing
-+
-+@testable import MLXAudioSTT
-+
-+struct VoxtralRealtimeTranscriptTextTests {
-+    /// Multi-byte characters cut at each position, a combining accent, regional
-+    /// indicators and a zero-width joiner, and bytes that are never valid UTF-8.
-+    private static let tokenPool: [[UInt8]] = [
-+        Array("hello".utf8), Array(" ".utf8), Array(" é".utf8), [0xC3], [0xA9],
-+        Array("e".utf8), Array("\u{301}".utf8), [0xCC], [0x81],
-+        Array("€".utf8), [0xE2], [0x82, 0xAC], [0xE2, 0x82], [0xAC],
-+        Array("😀".utf8), [0xF0, 0x9F], [0x98, 0x80], [0xF0], [0x9F, 0x98, 0x80],
-+        Array("🇫".utf8), Array("🇷".utf8), Array("👩".utf8), [0xE2, 0x80, 0x8D],
-+        [0xFF], [0x80], [0xC0, 0xAF], [0xED, 0xA0], [0xF4, 0x90], [0xE0, 0x80],
-+    ]
-+
-+    /// `text` must equal a one-pass decode of all bytes so far, and each delta must
-+    /// equal the whole-transcript comparison.
-+    @Test func matchesOnePassDecodingAndWholeTranscriptDeltas() {
-+        for seed in 0..<64 {
-+            var random = SplitMix64(seed: UInt64(seed))
-+            var transcript = VoxtralRealtimeTranscriptText()
-+            var allBytes: [UInt8] = []
-+            var previousText = ""
-+
-+            for _ in 0..<200 {
-+                let mark = transcript.mark
-+                // One decode step appends a few tokens.
-+                for _ in 0..<Int.random(in: 1...3, using: &random) {
-+                    let bytes = Self.tokenPool.randomElement(using: &random)!
-+                    transcript.append(bytes)
-+                    allBytes += bytes
-+                }
-+
-+                let expectedText = String(decoding: allBytes, as: UTF8.self)
-+                let expectedDelta = expectedText.hasPrefix(previousText)
-+                    ? String(expectedText.dropFirst(previousText.count))
-+                    : expectedText
-+                #expect(
-+                    Array(transcript.text.unicodeScalars) == Array(expectedText.unicodeScalars),
-+                    "seed \(seed)"
-+                )
-+                #expect(
-+                    Array(transcript.delta(since: mark).unicodeScalars)
-+                        == Array(expectedDelta.unicodeScalars),
-+                    "seed \(seed)"
-+                )
-+                previousText = expectedText
-+            }
-+        }
-+    }
-+
-+    @Test func aDeltaWithNoNewBytesIsEmpty() {
-+        var transcript = VoxtralRealtimeTranscriptText()
-+        transcript.append(Array("abc".utf8))
-+        transcript.append([0xE2, 0x82])
-+        let mark = transcript.mark
-+        #expect(transcript.delta(since: mark).isEmpty)
-+    }
-+
-+    @Test func holdsBackOnlyAnUnfinishedTrailingSequence() {
-+        let start = VoxtralRealtimeTranscriptText.unsettledSuffixStart
-+        #expect(start([]) == 0)
-+        #expect(start(Array("ab".utf8)) == 2)
-+        #expect(start([0x61, 0xC3]) == 1)             // "a" + first byte of "é"
-+        #expect(start([0x61, 0xC3, 0xA9]) == 3)       // "aé" is finished
-+        #expect(start([0xE2, 0x82]) == 0)             // two of the three bytes of "€"
-+        #expect(start([0xF0, 0x9F, 0x98]) == 0)       // three of the four bytes of "😀"
-+        #expect(start([0xF0, 0x9F, 0x98, 0x80]) == 4)
-+        #expect(start([0x80, 0x80]) == 2)             // stray continuations never finish
-+        #expect(start([0xFF]) == 1)                   // never valid
-+        #expect(start([0xC0]) == 1)                   // overlong lead, never valid
-+        #expect(start([0xC3, 0xA9, 0x80]) == 3)       // a finished character, then a stray
-+    }
-+
-+    @Test func textEndsInAReplacementCharacterWhileACharacterIsIncomplete() {
-+        var transcript = VoxtralRealtimeTranscriptText()
-+        transcript.append(Array("caf".utf8))
-+        transcript.append([0xC3])
-+        #expect(transcript.text == "caf\u{FFFD}")
-+        #expect(transcript.settled == "caf")
-+
-+        let mark = transcript.mark
-+        transcript.append([0xA9])
-+        #expect(transcript.text == "café")
-+        // "caf\u{FFFD}" is not a prefix of "café", so the step reports the whole text.
-+        #expect(transcript.delta(since: mark) == "café")
-+    }
-+}
-+
-+/// Small deterministic generator so every run sees the same token sequences.
-+private struct SplitMix64: RandomNumberGenerator {
-+    private var state: UInt64
-+
-+    init(seed: UInt64) {
-+        state = seed
-+    }
-+
-+    mutating func next() -> UInt64 {
-+        state &+= 0x9E37_79B9_7F4A_7C15
-+        var z = state
-+        z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
-+        z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
-+        return z ^ (z >> 31)
-+    }
-+}
-
-commit 0b55010ff7544f9746ad07f8639bcae46f4e9def
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Fri Sep 18 20:47:02 2026 +0200
-
-    VoxtralRealtime decoder: append KV rows in place instead of rebuilding the window (#264)
+    - Qualify Tokenizer as Tokenizers.Tokenizer to resolve ambiguity
+      with MLXLMCommon.Tokenizer (build blocker)
+    - Remove unused variable (MiniCPM.swift), change var→let where
+      not mutated (VoxAudioVAE.swift, VoxCPM2Model.swift)
+    - Add README.md with usage examples, streaming behavior, output
+      format, and known limitations
     
-    The decoder cache was a value that held exactly the sliding window. Every
-    decoded token concatenated its keys and values onto the whole window and
-    then sliced off the oldest row, in every layer, so each token copied the
-    entire cache and kept the old and new copies alive at the same time. Once
-    the window fills that is 8 192 rows per layer for Voxtral Mini 4B Realtime.
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
     
-    `VoxtralRealtimeDecoderKVCache` is now a class with storage that grows a
-    256-row block at a time. `append` writes the new rows with a slice update and
-    returns the last `slidingWindow` rows plus their absolute position, which is
-    what attention read before. Rows that fall out of the window stay in place
-    until a block of them has piled up or the storage is full, then the window is
-    copied down to row zero in one move. The index arithmetic lives in
-    `VoxtralRealtimeDecoderKVCacheAppendPlan` so it is testable without Metal.
+    * Exclude VoxCPM2 README.md from MLXAudioTTS target
     
-    The cache is a class, so `append` changes it for every holder. The decoder
-    passes each cache from one forward call to the next and never keeps an older
-    one.
+    Matches the existing exclude pattern for all other model READMEs.
     
-    Tests: the plan grows and compacts at the expected counts, and its position
-    offset matches the old eager trim over 2 000 appends. Against real arrays,
-    1 500 appends through one growth and several compactions return exactly the
-    rows and position offset that concatenate-then-trim returned.
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
     
+    * fix(voxcpm2): prevent OOM, add cancellation, cache constant tensors
+    
+    - Broaden eval() to include predFeat, breaking MLX lazy graph chains
+      that accumulate across 2000 AR steps and cause OOM
+    - Add Task.checkCancellation() in generation loop for cooperative cancel
+    - Add reserveCapacity for predFeatSeq and KV cache arrays
+    - Cache SinusoidalPosEmb freqs in init (was recomputed ~20k times/gen)
+    - Make rope, specialToken immutable (let) where never mutated after init
+    
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    
+    * fix(voxcpm2): thread safety, stream cancellation, weight diagnostics
+    
+    - Make tokenizer a let property injected via init (eliminates data race)
+    - Store Task handle in generateStream and hook onTermination for cancellation
+    - Replace Array(repeating:) with MLX.broadcast in Euler solver (avoids CPU alloc per ODE step)
+    - Add unmapped weight key logging in sanitize() (excludes quantization artifacts)
+    - Promote NSRegularExpression to static let in VoxAudioVAE sanitize
+    
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    
+    * Fix VoxCPM2 scalar multiplication for Xcode 26.3
+    
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    
+    * Fix VoxCPM2 build, audio transfer, and Python weight parity
+    
+    Close the TTS factory call and adopt the sending generation API, transferring
+    reference audio into the stream task and computing metadata before yielding.
+    Resample reference audio to the model rate in examples and smoke tests, and
+    restore Python's shape-based conversion of raw VAE convolution and Snake tensors.
+    
+    Add regression coverage for raw and converted VAE weights and audio resampling.
+    Validated with Xcode: 12 regression tests and both real-model VoxCPM2 smoke tests
+    passed, producing 48 kHz mono Float32 WAV output.
+    
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+    Co-authored-by: Shraey <shraey@Shraeys-MBP.modem>
+    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    Co-authored-by: Shraey <shraey@Shraeys-MBP-2.modem>
     Co-authored-by: Lucas Newman <lucas@future.fit>
+    Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeDecoder.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeDecoder.swift
-index 6e6daea..e6cf21a 100644
---- a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeDecoder.swift
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeDecoder.swift
-@@ -2,10 +2,147 @@ import Foundation
- import MLX
- import MLXNN
- 
--struct VoxtralRealtimeDecoderKVCache {
--    var keys: MLXArray   // [kv_len, n_kv_heads * head_dim]
--    var values: MLXArray // [kv_len, n_kv_heads * head_dim]
--    var positionOffset: Int
-+/// Index arithmetic for one `VoxtralRealtimeDecoderKVCache.append`, testable without
-+/// Metal. Rows older than the sliding window stay in place until a block of them has
-+/// piled up or the storage is full; then the window is copied down to row zero.
-+struct VoxtralRealtimeDecoderKVCacheAppendPlan: Equatable {
-+    static let capacityBlock = 256
-+
-+    /// Rows to copy down to row zero before appending, or nil when nothing moves.
-+    let compactionRange: Range<Int>?
-+    /// Where the new rows land, after any compaction.
-+    let appendRange: Range<Int>
-+    let capacity: Int
-+    let count: Int
-+    /// Absolute position of storage row zero after this append.
-+    let positionOffset: Int
-+    /// The rows attention sees: the last `slidingWindow` stored rows.
-+    let windowRange: Range<Int>
-+    /// Absolute position of the first row in `windowRange`.
-+    let windowPositionOffset: Int
-+    let requiresGrowth: Bool
-+
-+    static func make(
-+        count: Int,
-+        capacity: Int,
-+        positionOffset: Int,
-+        appendCount: Int,
-+        slidingWindow: Int
-+    ) -> Self {
-+        precondition(count >= 0 && count <= capacity)
-+        precondition(appendCount >= 0)
-+        precondition(slidingWindow > 0)
-+
-+        let projectedCount = count + appendCount
-+        let excessAfterAppend = max(0, projectedCount - slidingWindow)
-+        // Let one block of invisible rows accumulate. If the storage fills first,
-+        // reclaim that prefix instead of growing it again.
-+        let shouldCompact = count > slidingWindow
-+            && (projectedCount > capacity || excessAfterAppend > capacityBlock)
-+        let compactionRange: Range<Int>? = shouldCompact
-+            ? ((count - slidingWindow)..<count)
-+            : nil
-+        let droppedCount = compactionRange?.lowerBound ?? 0
-+        let compactedCount = compactionRange?.count ?? count
-+        let appendRange = compactedCount..<(compactedCount + appendCount)
-+        let requiredCapacity = appendRange.upperBound
-+        let requiresGrowth = requiredCapacity > capacity
-+        let capacityAfterGrowth: Int
-+        if requiresGrowth {
-+            capacityAfterGrowth = max(
-+                capacityBlock,
-+                ((requiredCapacity + capacityBlock - 1) / capacityBlock) * capacityBlock
-+            )
-+        } else {
-+            capacityAfterGrowth = capacity
-+        }
-+
-+        let newCount = appendRange.upperBound
-+        let windowStart = max(0, newCount - slidingWindow)
-+        let newPositionOffset = positionOffset + droppedCount
-+        return Self(
-+            compactionRange: compactionRange,
-+            appendRange: appendRange,
-+            capacity: capacityAfterGrowth,
-+            count: newCount,
-+            positionOffset: newPositionOffset,
-+            windowRange: windowStart..<newCount,
-+            windowPositionOffset: newPositionOffset + windowStart,
-+            requiresGrowth: requiresGrowth
-+        )
-+    }
-+}
-+
-+/// Decoder key/value cache that writes each new row into preallocated storage.
-+///
-+/// A token's rows go in through a slice update, which MLX runs in place only while
-+/// nothing else references the storage buffer. Holding `keys` or `values` across an
-+/// append makes MLX copy the whole storage instead.
-+///
-+/// It is a class, so `append` changes it for every holder.
-+final class VoxtralRealtimeDecoderKVCache {
-+    private(set) var keys: MLXArray   // [capacity, n_kv_heads * head_dim]
-+    private(set) var values: MLXArray // [capacity, n_kv_heads * head_dim]
-+    private(set) var count = 0
-+    private(set) var positionOffset = 0 // absolute position of storage row zero
-+
-+    private let slidingWindow: Int
-+
-+    init(width: Int, dtype: DType, slidingWindow: Int) {
-+        self.slidingWindow = slidingWindow
-+        let capacity = VoxtralRealtimeDecoderKVCacheAppendPlan.capacityBlock
-+        keys = MLXArray.zeros([capacity, width], dtype: dtype)
-+        values = MLXArray.zeros([capacity, width], dtype: dtype)
-+    }
-+
-+    /// Append rows and return what attention should read: the last `slidingWindow`
-+    /// stored rows, and the absolute position of the first of them.
-+    func append(keys newKeys: MLXArray, values newValues: MLXArray) -> (
-+        keys: MLXArray, values: MLXArray, positionOffset: Int
-+    ) {
-+        precondition(newKeys.ndim == 2 && newValues.ndim == 2)
-+        precondition(newKeys.shape == newValues.shape)
-+        precondition(newKeys.shape[1] == keys.shape[1])
-+        precondition(newKeys.dtype == keys.dtype && newValues.dtype == values.dtype)
-+
-+        let plan = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+            count: count,
-+            capacity: keys.shape[0],
-+            positionOffset: positionOffset,
-+            appendCount: newKeys.shape[0],
-+            slidingWindow: slidingWindow
-+        )
-+
-+        if let retained = plan.compactionRange {
-+            // The ranges may overlap. That is safe: the setter is functional, so the
-+            // right-hand side reads the pre-assignment values.
-+            keys[0..<retained.count] = keys[retained]
-+            values[0..<retained.count] = values[retained]
-+            count = retained.count  // the growth copy below reads this
-+        }
-+
-+        if plan.requiresGrowth {
-+            var grownKeys = MLXArray.zeros([plan.capacity, keys.shape[1]], dtype: keys.dtype)
-+            var grownValues = MLXArray.zeros([plan.capacity, values.shape[1]], dtype: values.dtype)
-+            if count > 0 {
-+                grownKeys[0..<count] = keys[0..<count]
-+                grownValues[0..<count] = values[0..<count]
-+            }
-+            keys = grownKeys
-+            values = grownValues
-+        }
-+
-+        keys[plan.appendRange] = newKeys
-+        values[plan.appendRange] = newValues
-+        count = plan.count
-+        positionOffset = plan.positionOffset
-+
-+        return (
-+            keys[plan.windowRange],
-+            values[plan.windowRange],
-+            plan.windowPositionOffset
-+        )
-+    }
- }
- 
- func voxtralComputeTimeEmbedding(
-@@ -103,26 +240,14 @@ final class VoxtralRealtimeDecoderAttention: Module {
-         q = voxtralApplyInterleavedRoPE(q, cos: ropeCos, sin: ropeSin, nHeads: nHeads, headDim: headDim)
-         k = voxtralApplyInterleavedRoPE(k, cos: ropeCos, sin: ropeSin, nHeads: nKvHeads, headDim: headDim)
- 
--        var positionOffset = cache?.positionOffset ?? 0
--        if let cache {
--            k = MLX.concatenated([cache.keys, k], axis: 0)
--            v = MLX.concatenated([cache.values, v], axis: 0)
--        }
--
--        var kvLen = k.shape[0]
--        if kvLen > slidingWindow {
--            let trim = kvLen - slidingWindow
--            k = k[trim...]
--            v = v[trim...]
--            kvLen = slidingWindow
--            positionOffset += trim
--        }
--
--        let newCache = VoxtralRealtimeDecoderKVCache(
--            keys: k,
--            values: v,
--            positionOffset: positionOffset
-+        let newCache = cache ?? VoxtralRealtimeDecoderKVCache(
-+            width: k.shape[1], dtype: k.dtype, slidingWindow: slidingWindow
-         )
-+        let window = newCache.append(keys: k, values: v)
-+        k = window.keys
-+        v = window.values
-+        let positionOffset = window.positionOffset
-+        let kvLen = k.shape[0]
- 
-         let q4 = q.reshaped(1, seqLen, nHeads, headDim).transposed(0, 2, 1, 3)
-         let k4 = k.reshaped(1, kvLen, nKvHeads, headDim).transposed(0, 2, 1, 3)
-diff --git a/Tests/VoxtralRealtimeDecoderKVCacheTests.swift b/Tests/VoxtralRealtimeDecoderKVCacheTests.swift
-new file mode 100644
-index 0000000..9002893
---- /dev/null
-+++ b/Tests/VoxtralRealtimeDecoderKVCacheTests.swift
-@@ -0,0 +1,150 @@
-+import MLX
-+import Testing
-+
-+@testable import MLXAudioSTT
-+
-+struct VoxtralRealtimeDecoderKVCachePlanTests {
-+    @Test func growsAtExactlyOneCapacityBlock() {
-+        let plan = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+            count: 256,
-+            capacity: 256,
-+            positionOffset: 0,
-+            appendCount: 1,
-+            slidingWindow: 512
-+        )
-+
-+        #expect(plan.compactionRange == nil)
-+        #expect(plan.appendRange == (256..<257))
-+        #expect(plan.requiresGrowth)
-+        #expect(plan.capacity == 512)
-+        #expect(plan.windowRange == (0..<257))
-+        #expect(plan.windowPositionOffset == 0)
-+    }
-+
-+    @Test func compactsOnlyAfterExcessExceedsOneBlock() {
-+        let atBlock = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+            count: 767,
-+            capacity: 1024,
-+            positionOffset: 0,
-+            appendCount: 1,
-+            slidingWindow: 512
-+        )
-+        #expect(atBlock.compactionRange == nil)
-+        #expect(atBlock.windowRange == (256..<768))
-+        #expect(atBlock.windowPositionOffset == 256)
-+
-+        let beyondBlock = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+            count: 768,
-+            capacity: 1024,
-+            positionOffset: 0,
-+            appendCount: 1,
-+            slidingWindow: 512
-+        )
-+        #expect(beyondBlock.compactionRange == (256..<768))
-+        #expect(beyondBlock.appendRange == (512..<513))
-+        #expect(!beyondBlock.requiresGrowth)
-+        #expect(beyondBlock.count == 513)
-+        #expect(beyondBlock.positionOffset == 256)
-+        #expect(beyondBlock.windowRange == (1..<513))
-+        #expect(beyondBlock.windowPositionOffset == 257)
-+    }
-+
-+    @Test func compactsBeforeGrowingWhenAnInvisiblePrefixExists() {
-+        let plan = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+            count: 512,
-+            capacity: 512,
-+            positionOffset: 30,
-+            appendCount: 1,
-+            slidingWindow: 400
-+        )
-+
-+        #expect(plan.compactionRange == (112..<512))
-+        #expect(plan.appendRange == (400..<401))
-+        #expect(!plan.requiresGrowth)
-+        #expect(plan.capacity == 512)
-+        #expect(plan.positionOffset == 142)
-+        #expect(plan.windowRange == (1..<401))
-+        #expect(plan.windowPositionOffset == 143)
-+    }
-+
-+    @Test func positionOffsetMatchesEagerTrimAcrossLongGeneration() {
-+        let slidingWindow = 512
-+        var count = 0
-+        var capacity = 256
-+        var positionOffset = 0
-+
-+        var referenceCount = 0
-+        var referencePositionOffset = 0
-+
-+        for _ in 0..<2000 {
-+            let plan = VoxtralRealtimeDecoderKVCacheAppendPlan.make(
-+                count: count,
-+                capacity: capacity,
-+                positionOffset: positionOffset,
-+                appendCount: 1,
-+                slidingWindow: slidingWindow
-+            )
-+            count = plan.count
-+            capacity = plan.capacity
-+            positionOffset = plan.positionOffset
-+
-+            referenceCount += 1
-+            if referenceCount > slidingWindow {
-+                let trim = referenceCount - slidingWindow
-+                referenceCount = slidingWindow
-+                referencePositionOffset += trim
-+            }
-+
-+            #expect(plan.windowRange.count == referenceCount)
-+            #expect(plan.windowPositionOffset == referencePositionOffset)
-+            #expect(positionOffset + plan.windowRange.lowerBound == referencePositionOffset)
-+        }
-+    }
-+}
-+
-+/// The cache must give attention what concatenate-then-trim gives: the same rows, in the
-+/// same order, at the same position offset.
-+struct VoxtralRealtimeDecoderKVCacheTests {
-+    @Test func windowsMatchConcatenateAndTrimAcrossGrowthAndCompaction() {
-+        let width = 2
-+        // Wider than one 256-row block, so the storage grows before it compacts.
-+        let slidingWindow = 300
-+        var nextValue = 0
-+        func rows(_ count: Int) -> MLXArray {
-+            let values = (nextValue..<(nextValue + count * width)).map(Float.init)
-+            nextValue += count * width
-+            return MLXArray(values, [count, width])
-+        }
-+
-+        // A prefill-sized first append, then one row per decoded token.
-+        let prefill = rows(5)
-+        let cache = VoxtralRealtimeDecoderKVCache(
-+            width: width, dtype: .float32, slidingWindow: slidingWindow
-+        )
-+        _ = cache.append(keys: prefill, values: prefill + 0.5)
-+        var referenceKeys = prefill
-+        var referencePositionOffset = 0
-+        var largestCapacity = cache.keys.shape[0]
-+
-+        for _ in 0..<1_500 {
-+            let newKeys = rows(1)
-+            let window = cache.append(keys: newKeys, values: newKeys + 0.5)
-+            largestCapacity = max(largestCapacity, cache.keys.shape[0])
-+
-+            referenceKeys = MLX.concatenated([referenceKeys, newKeys], axis: 0)
-+            if referenceKeys.shape[0] > slidingWindow {
-+                let trim = referenceKeys.shape[0] - slidingWindow
-+                referenceKeys = referenceKeys[trim...]
-+                referencePositionOffset += trim
-+            }
-+
-+            #expect(window.keys.shape == referenceKeys.shape)
-+            #expect(MLX.arrayEqual(window.keys, referenceKeys).item(Bool.self))
-+            #expect(MLX.arrayEqual(window.values, referenceKeys + 0.5).item(Bool.self))
-+            #expect(window.positionOffset == referencePositionOffset)
-+        }
-+
-+        // The storage grew once, from one block to two, and compaction kept it there.
-+        #expect(largestCapacity == 512)
-+    }
-+}
+commit 2cb59ad4309ae9b1dce4bdfc7503b42cfa8d588d
+Author: Alazer Manakelew <alazermanakelewb@gmail.com>
+Date:   Fri Oct 9 19:29:46 2026 -0400
 
-commit ad9c2c4d0f7b1a78056d3bdd33b4f18334c90017
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Fri Sep 18 20:40:33 2026 +0200
-
-    VoxtralRealtime streaming: drop conv and adapter rows once they are consumed (#263)
+    support for dia (#262)
     
-    The stream session kept every conv-stem row and every adapter row for the
-    life of the stream, and each step concatenated the new rows onto that whole
-    history. Memory and per-step copy time grew with stream length: a
-    20-minute run of Voxtral Mini 4B Realtime on an M-series MacBook Pro was
-    still adding about 23 MB of active memory per minute after the decoder's
-    sliding window filled.
+    * feat(dia): scaffold DiaConfig (encoder/decoder/model/data)
     
-    The encoder only reads conv rows from `encState.consumed` on, and the
-    decoder only reads adapter rows from `decPos` on. Each step now drops the
-    prefixes below those positions and counts them, so frame and decode indices
-    stay absolute. `feedIncremental` takes the absolute index of its first row.
-    Prefill reads the first adapter rows while `decPos` is still 0, so nothing
-    it needs is ever dropped.
+    * fix(descript-dac): drop output_padding in decoder transpose convs
     
-    `step` also stops buffering samples once the stream has finished on EOS or
-    `maxTokens`. Before, those samples piled up in `pendingSamples` for as long
-    as the host kept streaming.
+    The decoder's WNConvTranspose1d layers passed outputPadding: 1, adding one
+    sample per stage (4 stages) and shifting the decoded waveform. The reference
+    Descript DAC uses no output padding (kernel 2*stride, padding ceil(stride/2)),
+    which makes each stage an exact integer upsample. Removing it yields output of
+    exactly frames * hop_length and matches the reference to ~1e-4.
     
-    Tests: a one-minute stream that crosses the encoder window 47 times still matches
-    offline `generate` exactly, and the retained rows stay within bounds that do
-    not depend on stream length. Streaming after `maxTokens` buffers nothing.
+    * feat(dia): port Nari Labs Dia-1.6B to Swift
     
+    Encoder-decoder transformer TTS: byte-level text encoder, GQA self-attention
+    plus MHA cross-attention decoder over 9 delayed DAC codebooks with
+    classifier-free guidance, decoded to 44.1 kHz by the Descript audio codec.
+    
+    - DiaConfig/DiaLayers/DiaAudio/DiaTTSModel with T5-style DenseGeneral,
+      half-split RoPE, concat KV cache, precomputed cross-attention KV.
+    - Registered in the TTS factory (case "dia") with repo-name inference.
+    - Encoder, first decode-step logits, and full greedy waveform match the
+      Python mlx-audio reference to a relative error of ~1e-4 (float32).
+    - Config-decode, model-build, and model-type resolution unit tests.
+    
+    * Fix tests and update for API changes.
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucas@future.fit>
     Co-authored-by: Lucas Newman <lucas@future.fit>
+    Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-diff --git a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-index c5db22e..e833dc5 100644
---- a/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-+++ b/Sources/MLXAudioSTT/Models/VoxtralRealtime/VoxtralRealtimeStreamSession.swift
-@@ -40,6 +40,7 @@ extension VoxtralRealtimeAudioEncoder {
-     /// new transformer-normed frames (pre-downsample).
-     func feedIncremental(
-         _ convOut: MLXArray,
-+        startIndex: Int,
-         upTo: Int,
-         state: inout VoxtralRealtimeStreamEncoderState
-     ) -> MLXArray {
-@@ -48,7 +49,8 @@ extension VoxtralRealtimeAudioEncoder {
-         while state.consumed < upTo {
-             let blockEnd = state.blockBase + sw
-             let end = min(upTo, blockEnd)
--            let block = convOut[state.consumed..<end, 0...]
-+            // `convOut` starts at absolute row `startIndex`.
-+            let block = convOut[(state.consumed - startIndex)..<(end - startIndex), 0...]
-             // Block-relative positions: RoPE is relative, so this matches the absolute
-             // positions offline uses within each independent sw-block.
-             let relStart = state.consumed - state.blockBase
-@@ -81,11 +83,16 @@ public final class VoxtralRealtimeStreamSession {
- 
-     // Incremental front-end state; all rows are final (see the header notes).
-     // `flushed` means `finish()` sealed the stream by appending the offline right-pad.
-+    //
-+    // `convRows` and `adapterBuf` keep only the rows a later step can still read. The
-+    // `...Dropped` counters keep frame and decode positions absolute.
-     private var pendingSamples: [Float] = []
-     private var realSamplesFed = 0
-     private var melStream: VoxtralRealtimeMelStream?
-     private var convState = VoxtralRealtimeConvStemState()
-     private var convRows: MLXArray?
-+    private var convRowsDropped = 0
-+    private var adapterRowsDropped = 0
-     private var nDelayTokens = 0
-     private var flushed = false
- 
-@@ -123,10 +130,18 @@ public final class VoxtralRealtimeStreamSession {
-     /// Whether the stream has emitted EOS / hit maxTokens.
-     public var isFinished: Bool { done }
- 
-+    /// Buffered samples, conv-stem rows and adapter rows currently held. For tests.
-+    var retainedCounts: (samples: Int, convRows: Int, adapterRows: Int) {
-+        (pendingSamples.count, convRows?.shape[0] ?? 0, adapterBuf?.shape[0] ?? 0)
-+    }
-+
-     /// Ingest a chunk of 16 kHz mono samples; returns the text decoded by this call.
--    /// Calls after `finish()` are ignored (the stream is sealed by the final pad).
-+    /// Calls after `finish()` are ignored (the stream is sealed by the final pad), and
-+    /// so are calls after the stream finished on EOS or `maxTokens`.
-     @discardableResult
-     public func step(_ samples: [Float]) -> Delta {
-+        // Nothing reads samples buffered after the stream finished.
-+        guard !done else { return Delta(text: "", tokenIds: []) }
-         pendingSamples.append(contentsOf: samples)
-         return advance(final: false)
-     }
-@@ -198,7 +213,7 @@ public final class VoxtralRealtimeStreamSession {
-                 convRows = convRows == nil ? rows : MLX.concatenated([convRows!, rows], axis: 0)
-             }
-         }
--        let convRowCount = convRows?.shape[0] ?? 0
-+        let convRowCount = convRowsDropped + (convRows?.shape[0] ?? 0)
- 
-         // Emit ceiling: the whole-token span covered by real samples minus the
-         // trailing partial-token guard. The offline `min(nAudioTotal, …)` clamp can
-@@ -209,17 +224,26 @@ public final class VoxtralRealtimeStreamSession {
-         let convFreeze = min(convRowCount / ds, emitLimit) * ds
- 
-         if convFreeze > encState.consumed, let convRows {
--            let newEnc = model.encoder.feedIncremental(convRows, upTo: convFreeze, state: &encState)
-+            let newEnc = model.encoder.feedIncremental(
-+                convRows, startIndex: convRowsDropped, upTo: convFreeze, state: &encState
-+            )
-             let rows = model.encoder.downsampleAndProject(newEnc)   // multiple-of-ds ⇒ whole rows
-             adapterBuf = adapterBuf == nil ? rows : MLX.concatenated([adapterBuf!, rows], axis: 0)
-         }
-+        trimRetainedTails()
-         freezeEncoderState()
- 
-         guard let adapter = adapterBuf else {
-+            // Every adapter row was decoded and trimmed. `finish()` still owes the
-+            // cache clear below.
-+            if final { Memory.clearCache() }
-             return Delta(text: "", tokenIds: [])
-         }
-         prefillIfNeeded(adapter: adapter)
--        let delta = decode(adapter: adapter, upTo: min(emitLimit, adapter.shape[0]))
-+        let delta = decode(
-+            adapter: adapter,
-+            upTo: min(emitLimit, adapterRowsDropped + adapter.shape[0])
-+        )
- 
-         // Per-step clears re-allocate the working set cold 10x/s and defeat the
-         // host's `Memory.cacheLimit`. Match the offline `generate` loop instead:
-@@ -233,6 +257,25 @@ public final class VoxtralRealtimeStreamSession {
-         return delta
-     }
- 
-+    /// Drop the rows no later step reads: conv rows the encoder already consumed, and
-+    /// adapter rows below the decode position. `decPos` stays 0 until prefill, so the
-+    /// prompt rows are never dropped.
-+    ///
-+    /// A slice keeps its parent's buffer alive; `.contiguous()` copies the kept rows
-+    /// out so the dropped prefix is freed.
-+    private func trimRetainedTails() {
-+        if let rows = convRows, encState.consumed > convRowsDropped {
-+            let drop = encState.consumed - convRowsDropped
-+            convRows = drop < rows.shape[0] ? rows[drop..., 0...].contiguous() : nil
-+            convRowsDropped = encState.consumed
-+        }
-+        if let adapter = adapterBuf, decPos > adapterRowsDropped {
-+            let drop = decPos - adapterRowsDropped
-+            adapterBuf = drop < adapter.shape[0] ? adapter[drop..., 0...].contiguous() : nil
-+            adapterRowsDropped = decPos
-+        }
-+    }
-+
-     /// Materialise the carried front-end arrays (conv rows + conv tails), the adapter
-     /// buffer, and the encoder caches so the lazy graph stays bounded across chunks
-     /// (each chunk would otherwise extend one unbroken graph).
-@@ -250,6 +293,7 @@ public final class VoxtralRealtimeStreamSession {
- 
-     private func prefillIfNeeded(adapter: MLXArray) {
-         guard !prefilled, adapter.shape[0] >= promptLength else { return }
-+        precondition(adapterRowsDropped == 0, "adapter rows were dropped before prefill")
- 
-         let nLeft = model.config.nLeftPadTokens
-         let nDelay = promptLength - 1 - nLeft
-@@ -286,8 +330,8 @@ public final class VoxtralRealtimeStreamSession {
-             newIds.append(token)
- 
-             let tokenEmbed = model.decoder.embedToken(tokenId: token)
--            let inputEmbed = decPos < adapter.shape[0]
--                ? adapter[decPos] + tokenEmbed
-+            let inputEmbed = decPos < adapterRowsDropped + adapter.shape[0]
-+                ? adapter[decPos - adapterRowsDropped] + tokenEmbed
-                 : tokenEmbed
-             let next = model.decoder(
-                 inputEmbed.expandedDimensions(axis: 0),
-diff --git a/Tests/VoxtralRealtimeStreamingFrontEndTests.swift b/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-index ec58052..a269e47 100644
---- a/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-+++ b/Tests/VoxtralRealtimeStreamingFrontEndTests.swift
-@@ -268,6 +268,66 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-         #expect(session.tokens.count == offline.generationTokens)
-     }
- 
-+    /// A minute of audio crosses the 64-row encoder window 47 times and takes 760 decode
-+    /// steps. The transcript must still equal offline, and the rows the session holds
-+    /// must stay bounded.
-+    @Test func longStreamMatchesOfflineWithBoundedBuffers() throws {
-+        // EOS outside the vocabulary, so the random decoder cannot end the stream early.
-+        let fixtureDir = try Self.makeRandomFixture(encoderLayers: 1, eosTokenId: 99)
-+        defer { try? FileManager.default.removeItem(at: fixtureDir) }
-+
-+        let model = try VoxtralRealtimeModel.fromDirectory(fixtureDir)
-+        let samples = Self.sweep(60 * 16_000)
-+        let params = STTGenerateParameters(maxTokens: 2_000, temperature: 0.0)
-+        let offline = model.generate(audio: MLXArray(samples), generationParameters: params)
-+
-+        let session = model.makeStreamSession(maxTokens: 2_000)
-+        var mostConvRows = 0
-+        var mostAdapterRows = 0
-+        for chunk in Self.chunked(samples) {
-+            _ = session.step(chunk)
-+            let retained = session.retainedCounts
-+            #expect(retained.samples == 0)
-+            mostConvRows = max(mostConvRows, retained.convRows)
-+            mostAdapterRows = max(mostAdapterRows, retained.adapterRows)
-+        }
-+        _ = session.finish()
-+
-+        #expect(session.text == offline.text)
-+        #expect(session.tokens.count == offline.generationTokens)
-+        #expect(session.tokens.count > 700, "the stream must actually run long")
-+
-+        // The whole minute is 3 050 conv rows and 762 adapter rows. The encoder leaves
-+        // at most `downsample - 1` rows short of a whole token plus the one token the
-+        // partial-token guard holds back.
-+        let downsample = model.config.encoderArgs.downsampleFactor
-+        #expect(mostConvRows <= 2 * downsample)
-+        // A step holds the adapter rows its own chunk produced, plus carry-over.
-+        let largestChunkTokens = Self.chunkSizes.max()! / Self.samplesPerToken
-+        #expect(mostAdapterRows <= largestChunkTokens + 3)
-+    }
-+
-+    /// A stream that ended on `maxTokens` reads no more audio, so a host that keeps
-+    /// streaming must not grow the sample buffer.
-+    @Test func stepAfterTheStreamFinishedBuffersNoSamples() throws {
-+        let fixtureDir = try Self.makeRandomFixture(eosTokenId: 99)
-+        defer { try? FileManager.default.removeItem(at: fixtureDir) }
-+
-+        let model = try VoxtralRealtimeModel.fromDirectory(fixtureDir)
-+        let session = model.makeStreamSession(maxTokens: 4)
-+        _ = session.step(Self.sweep(20_000))
-+        #expect(session.isFinished)
-+
-+        let tokensBefore = session.tokens
-+        for chunk in Self.chunked(Self.sweep(60_000)) {
-+            let delta = session.step(chunk)
-+            #expect(delta.tokenIds.isEmpty)
-+        }
-+
-+        #expect(session.retainedCounts.samples == 0)
-+        #expect(session.tokens == tokensBefore)
-+    }
-+
-     /// finish() with no audio at all must still transcribe the zero-padded empty
-     /// stream, exactly like `generate` over an empty buffer.
-     @Test func emptyAudioFinishMatchesOffline() throws {
-@@ -288,10 +348,12 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-     /// Like `VoxtralRealtimeSTTTests.makeEOSFixture`, but with seeded random
-     /// weights so the decoded tokens actually depend on the conv-stem rows.
-     /// `encoderLayers` may be 0 (front end only) or 1 (exercises the encoder
--    /// transformer + sliding-window cache path too).
-+    /// transformer + sliding-window cache path too). An `eosTokenId` outside the
-+    /// 8-token vocabulary keeps the decoder from ever ending the stream.
-     private static func makeRandomFixture(
-         transcriptionDelayMs: Int = 0,
--        encoderLayers: Int = 0
-+        encoderLayers: Int = 0,
-+        eosTokenId: Int = 0
-     ) throws -> URL {
-         precondition((0...1).contains(encoderLayers))
-         let fixtureDir = FileManager.default.temporaryDirectory
-@@ -316,7 +378,7 @@ struct VoxtralRealtimeStreamingFrontEndTests {
-             "sampling_rate": 16000, "frame_rate": 12.5, "num_mel_bins": 128,
-             "hop_length": 160, "window_size": 400, "global_log_mel_max": 1.5
-           },
--          "transcription_delay_ms": \(transcriptionDelayMs), "bos_token_id": 1, "eos_token_id": 0,
-+          "transcription_delay_ms": \(transcriptionDelayMs), "bos_token_id": 1, "eos_token_id": \(eosTokenId),
-           "streaming_pad_token_id": 2, "n_left_pad_tokens": 1
-         }
-         """
+commit dbe5eaac964e8257785f9d015c81f819a38016a8
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 5 15:34:52 2026 -0700
+
+    Update for mlx-swift / mlx-swift-lm (#281)
+    
+    * Updates for mlx-swift / mlx-swift-lm.
+    
+    * Updates for mlx-swift / mlx-swift-lm.
+    
+    * Fix Xcode 26.6 build.
+
+commit 8d86630ade569728aaea3dc1a29fc44e2efa719b
+Author: Lucas Newman <lucas@future.fit>
+Date:   Wed Sep 30 13:10:23 2026 -0700
+
+    Fix test failures. (#276)
+    
+    Signed-off-by: Lucas Newman <lucas@future.fit>
+
+commit b7c7971d94c4f73de910797593851d00858daf19
+Author: Lucas Newman <lucas@future.fit>
+Date:   Tue Sep 29 16:36:07 2026 -0700
+
+    Improve padding for Qwen3-ASR batched inference. (#269)

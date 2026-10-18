@@ -459,17 +459,10 @@ public final class CSMModel: Module {
 
     public func cachesAreEnabled() -> Bool { cachesEnabled }
 
-    // mlx-swift-lm made makePromptCache(model:parameters:) throwing (it now surfaces
-    // KVCacheConfigurationError for an invalid requested or model-defined cache size).
-    // `parameters: nil` requests nothing, and backbone/decoder are plain transformer stacks
-    // with no model-defined size, so this call cannot actually throw here. `try?` keeps
-    // resetCaches() non-throwing -- making it throw would force the designated init and
-    // every construction site to throw -- and lands on nil, the same value the existing
-    // `as? [KVCacheSimple]` already produces when the cast does not match.
-    // wangqi modified 2026-08-31
     public func resetCaches() {
-        backboneCache = (try? makePromptCache(model: backbone, parameters: nil)) as? [KVCacheSimple]
-        decoderCache = (try? makePromptCache(model: decoder, parameters: nil)) as? [KVCacheSimple]
+        // CSM uses unbounded, unquantized caches with one entry per layer.
+        backboneCache = backbone.kvHeads.map { _ in KVCacheSimple() }
+        decoderCache = decoder.kvHeads.map { _ in KVCacheSimple() }
         cachesEnabled = true
     }
 
@@ -507,9 +500,7 @@ public final class CSMModel: Module {
         let basePos = MLXArray.arange(2).reshaped([1, 2])
         var currPos = repeated(basePos, count: B, axis: 0) // [B, 2]
 
-        // Same throwing-makePromptCache adaptation as resetCaches() above.
-        // wangqi modified 2026-08-31
-        decoderCache = (try? makePromptCache(model: decoder, parameters: nil)) as? [KVCacheSimple]
+        decoderCache = decoder.kvHeads.map { _ in KVCacheSimple() }
 
         let Cb = maxCodebooks != nil ? min(args.audioNumCodebooks, maxCodebooks ?? args.audioNumCodebooks) : args.audioNumCodebooks
         if Cb > 1 {

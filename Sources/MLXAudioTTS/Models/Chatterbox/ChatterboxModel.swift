@@ -683,11 +683,11 @@ public final class ChatterboxModel: Module, SpeechGenerationModel, @unchecked Se
     public func generate(
         text: String,
         voice: String?,
-        refAudio: MLXArray?,
+        refAudio: sending MLXArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> MLXArray {
+    ) async throws -> sending MLXArray {
         // Use reference audio, or fall back to default conditioning
         let t3Cond: T3Cond
         let xVector: MLXArray
@@ -864,14 +864,16 @@ public final class ChatterboxModel: Module, SpeechGenerationModel, @unchecked Se
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: MLXArray?,
+        refAudio: sending MLXArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
 
+        let refAudio = SendingBox(refAudio)
         let task = Task { @Sendable [weak self] in
+            let refAudio = refAudio.take()
             guard let self else {
                 continuation.finish(throwing: AudioGenerationError.modelNotInitialized("Model deallocated"))
                 return
@@ -888,8 +890,6 @@ public final class ChatterboxModel: Module, SpeechGenerationModel, @unchecked Se
                 )
                 let generateTime = Date().timeIntervalSince(startTime)
 
-                continuation.yield(.audio(audio))
-
                 let info = AudioGenerationInfo(
                     promptTokenCount: 0,
                     generationTokenCount: audio.dim(audio.ndim - 1),
@@ -898,6 +898,7 @@ public final class ChatterboxModel: Module, SpeechGenerationModel, @unchecked Se
                     tokensPerSecond: Double(audio.dim(audio.ndim - 1)) / max(generateTime, 0.001),
                     peakMemoryUsage: 0
                 )
+                continuation.yield(.audio(audio))
                 continuation.yield(.info(info))
                 continuation.finish()
             } catch {
