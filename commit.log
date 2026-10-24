@@ -1,151 +1,628 @@
-commit 244458d7b61e54ff135073ddc9ed76782bb20758
+commit 6fd938669e45412f5c35e011e7086ecd20397dbd
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Sat Oct 10 16:07:35 2026 -0700
+Date:   Sat Oct 24 19:23:22 2026 +0200
 
-    Fix parallel test runner. (#282)
+    Add MOSS-Music support (#313)
 
-commit a0bd39c923e1359d5deb3d049c89fa5585cf479a
-Author: Shraey Bhatia <shraeybhatia@gmail.com>
-Date:   Sat Oct 10 10:58:09 2026 +1100
+commit e89b6c95cc507e9b162bae0288fa4fee8634d199
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Sat Oct 24 18:23:07 2026 +0200
 
-    Add VoxCPM2 TTS model (2B params, 48kHz, voice cloning) (#175)
+    Add Ming 3.0 ASR Tiny model (#312)
     
-    * Add VoxCPM2 TTS model (2B params, 48kHz, voice cloning)
+    * Add Ming 3.0 ASR Tiny support
     
-    Autoregressive MiniCPM backbone + CFM diffusion + AudioVAE decoder.
-    Ported from mlx-audio Python voxcpm2 implementation with:
-    - Config-driven generation constants (inferenceTimesteps, cfgScale)
-    - Resilient Codable decoding with defaults for all config structs
-    - 48kHz→16kHz resampling for encoder input
-    - BOS/EOS stripping in tokenizer to match upstream Python behavior
-    - Proper weight sanitization (snake_case→camelCase, RoPE buffers)
-    - Smoke tests for generate and stream paths
+    * Simplify Ming license comments
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    * Make Ming tests compile with Xcode 26.6
+
+commit d8e2cafea891928075d3c8577b1a05b99396594e
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Sat Oct 24 01:18:29 2026 +0200
+
+    Add MiMo ASR support (#311)
+
+commit 949be25cd97e33e933334597340bbe9786612142
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Sat Oct 24 00:11:38 2026 +0200
+
+    Add VibeVoice ASR support (#309)
+
+commit 4ce41465867edd7ec1b55faea3b2309db15768ca
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 23:03:15 2026 +0200
+
+    Add offline Voxtral Mini support (#308)
+
+commit 1e1dc5fd90135715fb9bf79382d3bba15b464c23
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 22:14:52 2026 +0200
+
+    Add Qwen2-Audio model (#306)
     
-    * Fix build error, warnings, and add model README
+    * Add Qwen2-Audio support
     
-    - Qualify Tokenizer as Tokenizers.Tokenizer to resolve ambiguity
-      with MLXLMCommon.Tokenizer (build blocker)
-    - Remove unused variable (MiniCPM.swift), change var→let where
-      not mutated (VoxAudioVAE.swift, VoxCPM2Model.swift)
-    - Add README.md with usage examples, streaming behavior, output
-      format, and known limitations
+    * Allow cold Metal initialization in cache tests
+
+commit 0cd69c01e47d68e4293777a685f99e51bfe38178
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Fri Oct 23 13:01:39 2026 -0700
+
+    TTS: Kokoro and Kitten text processors use the loadModel cache (#307)
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    MisakiTextProcessor and KokoroMultilingualProcessor downloaded the
+    English G2P model, the lexicons and the neural G2P model into
+    HubCache.default, whatever cache was passed to TTS.loadModel. Both now
+    take an optional cache, and TTS.loadModel builds the default processors
+    with its own.
     
-    * Exclude VoxCPM2 README.md from MLXAudioTTS target
+    Fixes #242
+
+commit 902920c5042322dd69b6d3aa9b6a5c22c19919d8
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 19:05:04 2026 +0200
+
+    Add MiMo codec (#305)
     
-    Matches the existing exclude pattern for all other model READMEs.
+    * Share codec loading and preserve reconstruction audio metadata
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    * Register MiMo in shared codec loading and the codec CLI
     
-    * fix(voxcpm2): prevent OOM, add cancellation, cache constant tensors
+    * Add the MiMo audio tokenizer and waveform decoder
     
-    - Broaden eval() to include predFeat, breaking MLX lazy graph chains
-      that accumulate across 2000 AR steps and cause OOM
-    - Add Task.checkCancellation() in generation loop for cooperative cancel
-    - Add reserveCapacity for predFeatSeq and KV cache arrays
-    - Cache SinusoidalPosEmb freqs in init (was recomputed ~20k times/gen)
-    - Make rope, specialToken immutable (let) where never mutated after init
+    * Record shared codec integration and parity build guidance
+
+commit 346be683371378630efa9769dd338a7b6b4e739c
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 18:38:59 2026 +0200
+
+    Add Nemotron-VoiceChat codec (#304)
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    * Share codec loading and preserve reconstruction audio metadata
     
-    * fix(voxcpm2): thread safety, stream cancellation, weight diagnostics
+    * Register Nemotron in shared codec loading and the codec CLI
     
-    - Make tokenizer a let property injected via init (eliminates data race)
-    - Store Task handle in generateStream and hook onTermination for cancellation
-    - Replace Array(repeating:) with MLX.broadcast in Euler solver (avoids CPU alloc per ODE step)
-    - Add unmapped weight key logging in sanitize() (excludes quantization artifacts)
-    - Promote NSRegularExpression to static let in VoxAudioVAE sanitize
+    * Add the Nemotron VoiceChat audio codec
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    * Record shared codec integration and parity build guidance
+
+commit 9162db0f7e8787556cd4288115b2ff7984a49753
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 18:38:49 2026 +0200
+
+    Add Granite Speech 4.1 and 5.0 support (#303)
     
-    * Fix VoxCPM2 scalar multiplication for Xcode 26.3
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+
+commit 654d4d81a3dae4106f7bf7c1de3788c9847586e7
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Fri Oct 23 09:28:04 2026 -0700
+
+    Core: reuse a cached snapshot that has no config.json (#296)
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    The cache check required config.json before it looked at the snapshot
+    manifest, so a repo that ships none (kitten-tts-g2p ships
+    us_bart_config.json) lost its manifest and was fetched again on every
+    load, and never resolved offline. When config.json is absent, the
+    manifest now decides completeness on its own.
     
-    * Fix VoxCPM2 build, audio transfer, and Python weight parity
+    Refs #242
+
+commit 013853a70b7c657256e748ff9527e5817f6f1b31
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 23 00:07:24 2026 +0200
+
+    Add Parakeet Redux STT model (#302)
     
-    Close the TTS factory call and adopt the sending generation API, transferring
-    reference audio into the stream task and computing metadata before yielding.
-    Resample reference audio to the model rate in examples and smoke tests, and
-    restore Python's shape-based conversion of raw VAE convolution and Snake tensors.
+    * Add Parakeet Redux support
     
-    Add regression coverage for raw and converted VAE weights and audio resampling.
-    Validated with Xcode: 12 regression tests and both real-model VoxCPM2 smoke tests
-    passed, producing 48 kHz mono Float32 WAV output.
+    * Load published Parakeet Redux checkpoints directly
+
+commit 0f7a622c1947ba044b6502fdd6343b01d3ddfc34
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 22 23:04:09 2026 +0200
+
+    Add Higgs Audio v3 STT model (#301)
     
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
+    * Fix partial model downloads returning as valid from the HF cache.
+    
+    * Add native Higgs-Audio v3 STT inference and parity tests
+    
+    * docs: make Higgs-Audio v3 STT README user-facing
+    
+    * test: embed tiny Higgs config and remove validation scripts
+    
+    * Make Higgs transcription tests self-contained
+    
+    * Use Swift examples in the Higgs README
+    
+    * Unify Higgs-Audio generation and keep controls in Swift
+    
+    * Use fixed-duration chunks for Higgs transcription
+    
+    * Simplify Higgs model loading
+
+commit 262a391a6a63c2e6923e826bcc7122caee0f18f6
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 22 22:48:02 2026 +0200
+
+    Add Fun-ASR-Nano STT model (#300)
+    
+    * Fix partial model downloads returning as valid from the HF cache.
+    
+    * Add native Fun-ASR-Nano speech recognition
+    
+    * docs: make Fun-ASR-Nano README user-facing
+    
+    * test: simplify Fun-ASR-Nano fixtures and remove validation scripts
+    
+    * Make Fun-ASR-Nano tests self-contained
+    
+    * Use Swift examples in the Fun-ASR-Nano README
+    
+    * Remove the context option from the STT CLI
+    
+    * Unify Fun-ASR generation and simplify the STT CLI
     
     ---------
     
     Signed-off-by: Lucas Newman <lucasnewman@me.com>
-    Co-authored-by: Shraey <shraey@Shraeys-MBP.modem>
-    Co-authored-by: Shraey Bhatia <10261100+sb1992@users.noreply.github.com>
-    Co-authored-by: Shraey <shraey@Shraeys-MBP-2.modem>
-    Co-authored-by: Lucas Newman <lucas@future.fit>
-    Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-commit 2cb59ad4309ae9b1dce4bdfc7503b42cfa8d588d
-Author: Alazer Manakelew <alazermanakelewb@gmail.com>
-Date:   Fri Oct 9 19:29:46 2026 -0400
+commit 2e32b496bfc8ab00b1f448216d804617049180d7
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 22 20:51:53 2026 +0200
 
-    support for dia (#262)
+    Add Granite Speech TurboCTC STT model (#298)
     
-    * feat(dia): scaffold DiaConfig (encoder/decoder/model/data)
+    * Fix partial model downloads returning as valid from the HF cache.
     
-    * fix(descript-dac): drop output_padding in decoder transpose convs
+    * Add native Granite Speech 5 TurboCTC inference and parity tests
     
-    The decoder's WNConvTranspose1d layers passed outputPadding: 1, adding one
-    sample per stage (4 stages) and shifting the decoded waveform. The reference
-    Descript DAC uses no output padding (kernel 2*stride, padding ceil(stride/2)),
-    which makes each stage an exact integer upsample. Removing it yields output of
-    exactly frames * hop_length and matches the reference to ~1e-4.
+    * docs: make Granite TurboCTC README user-facing
     
-    * feat(dia): port Nari Labs Dia-1.6B to Swift
+    * test: embed tiny Granite CTC config and remove validation script
     
-    Encoder-decoder transformer TTS: byte-level text encoder, GQA self-attention
-    plus MHA cross-attention decoder over 9 delayed DAC codebooks with
-    classifier-free guidance, decoded to 44.1 kHz by the Descript audio codec.
+    * Remove retained Granite CTC test tensors
     
-    - DiaConfig/DiaLayers/DiaAudio/DiaTTSModel with T5-style DenseGeneral,
-      half-split RoPE, concat KV cache, precomputed cross-attention KV.
-    - Registered in the TTS factory (case "dia") with repo-name inference.
-    - Encoder, first decode-step logits, and full greedy waveform match the
-      Python mlx-audio reference to a relative error of ~1e-4 (float32).
-    - Config-decode, model-build, and model-type resolution unit tests.
+    * Use Swift examples in the Granite CTC README
     
-    * Fix tests and update for API changes.
+    * Use generate for Granite TurboCTC transcription
+
+commit 1e35e17319b35c8313878cb7f2712f23e4f27eff
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Thu Oct 22 11:51:17 2026 -0700
+
+    Whisper: add a translate task to STTGenerateParameters (#295)
+    
+    The Whisper tokenizer already builds the translate prompt, but generate
+    always asked for "transcribe", and STTGenerateParameters had no way to
+    ask for anything else. It now has `task` ("transcribe" by default,
+    "translate" for X-to-English), which Whisper passes to its prompt, and
+    the STT CLI takes --task. Other models ignore it.
+    
+    Refs #173
+
+commit 14b634e866e597b7e4f4c9f30ad106f5af016a4c
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 22 20:45:24 2026 +0200
+
+    Add Phonon 2 STT model (#297)
+    
+    * Fix partial model downloads returning as valid from the HF cache.
+    
+    * Add native Phonon-2 STT support and parity tests
+    
+    * docs: make Phonon-2 README user-facing
+    
+    * docs: replace embedded Phonon-2 license with README note
+    
+    * Remove file.
+    
+    * test: embed tiny Phonon-2 config
+    
+    * Remove retained Phonon-2 test tensors
+    
+    * Use Swift examples in the Phonon-2 README
+
+commit 8a34adc26b7e8e14f585f39137f8f1c647ed4e8e
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 22 20:31:08 2026 +0200
+
+    Add Mega-ASR model (#299)
+    
+    * Fix partial model downloads returning as valid from the HF cache.
+    
+    * Add native Mega-ASR routed transcription
+    
+    * docs: make Mega-ASR README user-facing
+    
+    * test: remove Mega-ASR validation scripts
+    
+    * Replace Mega-ASR tensor fixtures with generated test data
+    
+    * Use Swift examples in the Mega-ASR README
+    
+    * Default to automatic routing in the STT CLI
+    
+    * Remove the context option from the STT CLI
+    
+    * Centralize local checkpoint loading in the STT loader
+    
+    * Add a shared throwing STT generation entrypoint
+    
+    * Simplify STT generation and defer throwing errors
+
+commit 19f2296420c875b4f782825c5f5fcb554ed87e38
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Thu Oct 22 08:16:38 2026 -0700
+
+    Qwen3-ASR: cap maxTokens per chunk, not per file (#294)
+    
+    generate and generateStream spent one maxTokens budget across all chunks
+    and stopped once it ran out, so long audio lost its later chunks with no
+    segment and nothing in STTOutput to say so. maxTokens now caps each
+    chunk's decode, as MOSS already does, so the 8192 default bounds one
+    chunk.
+    
+    Fixes #248
+
+commit 5c4c12b699234f55d1816dfdb36f7016086a49bb
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 16:24:36 2026 -0700
+
+    STT: forward the loadModel cache to the six loaders that dropped it (#293)
+    
+    * STT: forward the loader's cache to six more fromPretrained
+    
+    VoxtralRealtime, Cohere, Canary, Wav2Vec2, LASR and Moonshine took no
+    cache, so STT.loadModel(modelRepo:cache:) read config.json from the
+    supplied cache and then downloaded the whole model again into
+    HubCache.default. Each now takes cache: HubCache = .default and passes it
+    to resolveOrDownloadModel.
+    
+    Fixes #279
+    
+    * Drop the STT loader cache test
+    
+    It needed a hand-written copy of ModelUtils' snapshot listing and asserted
+    through a decoding error; the change is plain argument forwarding.
+
+commit 865963e3880236d64c426037816b218cb6c159a8
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 15:18:00 2026 -0700
+
+    Build against mlx-swift main (#469): Parakeet and Qwen3-TTS compile calls (#292)
+    
+    * Parakeet: store compiled closures without @Sendable
+    
+    mlx-swift#469 changed compile(inputs:) to return a non-Sendable closure,
+    because the closure captures the modules passed as inputs. ParakeetModel
+    stored both compiled closures as @Sendable, so main stops compiling at
+    ParakeetModel.swift:326 and :909 against mlx-swift main. Package.swift
+    accepts any 0.x from 0.32.3, so the next mlx-swift release would break
+    every fresh resolve.
+    
+    Neither closure leaves the model, so the annotation bought nothing.
+    Dropping it builds against both 0.32.3 and mlx-swift main.
+    
+    * Qwen3-TTS: call MLX.compile for the SwiGLU kernels
+    
+    mlx-swift#469 added compile(shapeless:_:) for two-argument @Sendable
+    closures to MLX, with the same signature as MLXAudioCore's compile shim.
+    Qwen3TTSCodePredictor.swift:9 and Qwen3TTSTalker.swift:34 import both
+    modules, so against mlx-swift main the bare call is ambiguous and
+    MLXAudioTTS stops compiling. Naming MLX picks the same function the shim
+    forwards to, on 0.32.3 and on main.
+
+commit b7dd2e0c93065d15c860864ba3cbccab565f4d07
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 15:17:46 2026 -0700
+
+    Nemotron streaming: reuse decoder and encoder work that has not changed (#275)
+    
+    * Nemotron RNN-T decode: reuse the prediction network output on blank frames
+    
+    The prediction network output, its proposed LSTM state and the joint's pred
+    projection depend only on (lastToken, decoderState), which change only on
+    emission. Cache them and clear the cache on every emission, so a blank frame
+    costs one enc projection and the joint output layer instead of an LSTM step too.
+    Applies to the stream decode and the offline decode; the offline loop also
+    drops the eval before .item(), which already evaluates the joint output.
+    
+    Idea from achembarpu (be2beeb, a60b91a). His cache was keyed on lastToken,
+    which reuses a stale output when the same token is emitted twice in a row;
+    clearing on emission avoids that.
+    
+    * Nemotron stream encoder: build per-chunk invariants once
+    
+    posEnc depends only on chunk length, cache length and dtype, which are the
+    same for every layer within a chunk, so layers share one embedding. The
+    prompt one-hot depends only on (batch, chunk length, dtype, prompt index), so
+    the stream state reuses it for every whole chunk. The 0.5 residual scale is
+    cast once per chunk instead of twice per layer, recast if a layer's dtype
+    differs. Same values, same ops downstream.
+    
+    * Nemotron streaming: skip the text rebuild when a step emits no token
+    
+    The full text is rebuilt from every token so far after each step and chunk,
+    so a long session costs O(tokens) host work per step. With no new token the
+    rebuilt text equals the previous one and the delta is empty, so skip it.
+    
+    * Nemotron RNN-T stream decode: read tokens for 4 frames per host sync
+    
+    With the prediction cached, the tokens of the next frames only depend on
+    their encoder frame until an emission. Build each frame's joint and argmax
+    as before (separate M=1 ops, same inputs), read up to 4 of them back with one
+    asArray instead of one .item() per frame, and drop the rest on emission.
+    Blank runs need a quarter of the syncs; an emission wastes at most 3 joint
+    evaluations.
+    
+    * Nemotron streaming: cache segments with the text; one optional for the prediction cache
+    
+    The segments getter rebuilt every sentence on each access. The alignment is
+    now rebuilt only when a step adds a token, and segments are built once from
+    it. The stream prediction cache is one optional tuple, like the offline one,
+    and the offline loop drops its force unwraps.
+    
+    * Test: Nemotron stream RNN-T decode matches per-frame recompute
+    
+    The per-frame reference recomputes the prediction network on every frame.
+    The random tiny model can predict blank everywhere or nowhere, so a seeded
+    calibration shifts the joint's blank bias and pushes special tokens down
+    until the reference has blank frames, emitted tokens and a frame with 2+
+    symbols. Covers emissions inside a 4-frame sync batch and a short last batch.
+    The offline decode must match the cache-aware stream; that test only needs
+    blank frames and emitted tokens, since no bias shift gave a 2+ symbol frame
+    for the bf16 offline input on Metal CI.
+    
+    * Nemotron streaming: evaluate the cached prompt one-hot; say why the cached prediction isn't
+
+commit 0ef2fed020b66bafdea3a9c5018247e9778676bd
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Wed Oct 21 23:58:54 2026 +0200
+
+    Fix partial model downloads returning as valid from the HF cache. (#291)
+
+commit 00abb7fa90df4339ec75fc6b478449bafb222cf8
+Author: John Paul Soliva <soliva.johnpaul@icloud.com>
+Date:   Thu Oct 22 06:53:21 2026 +0900
+
+    Irodori-TTS: add v4.1 and v4.1-MF (MeanFlow) support (#284)
+    
+    * Irodori-TTS: decode v4 / v4.1-MF config fields
+    
+    Add flow_parameterization (meanflow), the pretrained text encoder fields
+    (text_encoder_type/revision/config, pretrained_projector_*), the embedded
+    ModernBERT config (flat or transformers>=5 nested RoPE thetas) and
+    ref_max_seconds. ref_max_seconds stays nil when a config omits it, so v1-v3
+    reference handling is unchanged; v3 configs decode exactly as before.
+    
+    Mirrors yoshphys's Python port in Blaizzy/mlx-audio (98a021d0, b3cb138f).
+    
+    * Irodori-TTS: add ModernBERT encoder for v4
+    
+    Swift port of mlx_audio irodori_tts/modernbert.py: bidirectional
+    ModernBERT (global attention every 3rd layer, sliding window elsewhere,
+    separate global/local RoPE thetas in rotate_half form, GeGLU MLP, bias-free
+    float32-accumulating LayerNorm). Property names follow the checkpoint's
+    pretrained_text_backbone.backbone.* keys after camelCase sanitizing.
+    
+    With Python's padded inputs the hidden states of the 25-layer
+    modernbert-ja-310m backbone are bit-identical to the Python port.
+    
+    * Irodori-TTS: v4 text/caption projectors and MeanFlow conditioning in the DiT
+    
+    v4 replaces the scratch text and caption encoders with the shared
+    pretrained ModernBERT backbone plus per-condition linear/residual_mlp
+    projectors. MeanFlow checkpoints add delta_cond_module, an interval-length
+    (t - r) embedding summed into the timestep conditioning; forwardWithConditions
+    takes deltaT and rejects it for RF-velocity models, as upstream does.
+    
+    * Irodori-TTS: add MeanFlow sampler and upstream CFG gating
+    
+    irodoriSampleEulerMeanFlow: linear 1->0 schedule, one conditional forward
+    per step with delta_t = t - t_next, no CFG (v4.1-MF, 4 steps).
+    
+    The CFG sampler now skips caption guidance when the caption mask is empty
+    and lets caption guidance alone enable CFG (upstream a8e51b42). Both
+    samplers accept pre-encoded conditions so the encoders run once per
+    utterance, and an optional initial noise for parity testing.
+    
+    * Irodori-TTS: load and run v4.1 / v4.1-MF checkpoints
+    
+    - Load the tokenizer bundled under tokenizer/ (sanitized copy in Caches;
+      the downloaded files are not modified) and download it with the model.
+    - v4 uses the upstream text normaliser (keeps 。/、, folds .., NFKC,
+      depth-aware bracket stripping); v1-v3 keep the existing normaliser.
+    - v4 drops token padding before the encoder; padded keys were masked
+      everywhere, so this only removes work.
+    - Encode conditions once and share them between duration prediction and
+      the sampler (v3 output is bit-identical).
+    - The zero-reference placeholder spans one full speaker patch; with v4's
+      speaker_patch_size 4 it previously patched to an empty sequence.
+    - Strip the caption and mask an empty one (upstream a9754f4d, 0e846d23);
+      for v3 this only changes an empty or whitespace-padded voice string.
+    - Cap reference audio at ref_max_seconds when the config sets it.
+    - Expose per-phase timings as lastTimings.
+    
+    Based on yoshphys's Python v4 / MeanFlow port in Blaizzy/mlx-audio
+    (98a021d0, 0e846d23, a8e51b42, a9754f4d, ece79de8, b3cb138f).
+    
+    * Irodori-TTS: add v4 / MeanFlow unit tests
+    
+    Offline tests on tiny configurations, with goldens produced by the Python
+    mlx-audio implementation: v4.1-MF and v3 config decoding, ModernBERT
+    forward (key mask + sliding window), the MeanFlow sampler, the zero
+    reference with speaker patch size 4, and the upstream normaliser.
+    
+    * Irodori-TTS: document v4.1 and v4.1-MF
+    
+    * Fix Irodori tokenizer cache races and portable parity tests
+    
+    * Normalize published Irodori tokenizer cache URLs
     
     ---------
     
-    Signed-off-by: Lucas Newman <lucas@future.fit>
-    Co-authored-by: Lucas Newman <lucas@future.fit>
     Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-commit dbe5eaac964e8257785f9d015c81f819a38016a8
+commit e2ecced3bfbd88546d314b7d7c09180b90d73b74
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Mon Oct 5 15:34:52 2026 -0700
+Date:   Wed Oct 21 23:47:14 2026 +0200
 
-    Update for mlx-swift / mlx-swift-lm (#281)
+    Fix speaking rate in non-streaming Qwen3-TTS generation. (#290)
+
+commit ba6e46c10b8b1a50cb0a4f81bcd4f20be6dc316d
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 14:44:15 2026 -0700
+
+    VoxtralRealtime generateStream: build deltas from token bytes (#273)
     
-    * Updates for mlx-swift / mlx-swift-lm.
+    * VoxtralRealtime generateStream: build deltas from token bytes
     
-    * Updates for mlx-swift / mlx-swift-lm.
+    generateStream re-decoded the whole transcript on every token to find the
+    new text, so a stream of n tokens cost O(n^2) decoding. It now appends each
+    token's bytes to VoxtralRealtimeTranscriptText, as the stream session does,
+    and yields the same deltas, including for tokens that split a multi-byte
+    character.
     
-    * Fix Xcode 26.6 build.
-
-commit 8d86630ade569728aaea3dc1a29fc44e2efa719b
-Author: Lucas Newman <lucas@future.fit>
-Date:   Wed Sep 30 13:10:23 2026 -0700
-
-    Fix test failures. (#276)
+    The decode loops also take the argmax together with the decoder step, one
+    GPU sync per token instead of two; build the RoPE inverse frequencies once
+    at init instead of on every forward pass; and skip the decoder pass after
+    the last position, whose prediction nothing reads. Token ids are unchanged.
     
-    Signed-off-by: Lucas Newman <lucas@future.fit>
+    * VoxtralRealtime: address review on #273
+    
+    evalPrediction's callers all pass one row from decoder.logits, and
+    argMax(axis: -1) gives a single element for [vocab] and [1, vocab]
+    alike, so the rank check goes. ropeInvFreq now evaluates the array it
+    returns, since the decoder caches it.
 
-commit b7c7971d94c4f73de910797593851d00858daf19
-Author: Lucas Newman <lucas@future.fit>
-Date:   Tue Sep 29 16:36:07 2026 -0700
+commit d36caf92e125db11308b81ffd983b4504e24551c
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 14:37:43 2026 -0700
 
-    Improve padding for Qwen3-ASR batched inference. (#269)
+    VoxtralRealtime streaming: reuse the mel Hann window instead of rebuilding it per append (#271)
+    
+    * perf: reuse the Voxtral streaming Hann window
+    
+    melColumns rebuilt the 400-point window on every append: an arange, a cast,
+    a cosine and two arithmetic ops per 100 ms of audio. Hoist it into
+    periodicHannWindow(size:) and cache one on VoxtralRealtimeMelStream.
+    
+    [tom: made the window parameter required rather than optional, which leaves
+    melColumns with one code path and makes its windowSize parameter dead]
+    
+    * test(voxtral): cover the periodic Hann window definition
+    
+    Checks periodicHannWindow against the formula and asserts the last sample is
+    non-zero, which a symmetric N-1 window would not satisfy.
+    
+    * test(voxtral): add an opt-in benchmark for the window rebuild
+    
+    Times melColumns with a rebuilt window against a reused one in one process,
+    plus a full melStream.append for the denominator. Off unless
+    VOXTRAL_MEL_BENCH=1, and it needs xcodebuild: swift test has no metallib.
+    
+    * VoxtralRealtime: evaluate the Hann window when it is built
+    
+    The mel stream keeps the window for the whole session; evaluating it in
+    periodicHannWindow means the first append doesn't pay for building it.
+    
+    ---------
+    
+    Co-authored-by: Arvind Chembarpu <achembarpu@gmail.com>
+
+commit 624fd5410b2fc8ea06f955500c9ac078e405261f
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 08:18:36 2026 -0700
+
+    Nemotron streaming: compute only new mel frames; keep MLX's buffer cache between steps (#274)
+    
+    * Nemotron stream: keep MLX's buffer cache between steps
+    
+    advance() called Memory.clearCache() after every step, so each step handed
+    its buffers back to Metal and allocated them again. Steps now reuse the
+    cached buffers; the cache is cleared once when the stream finishes.
+    
+    * Nemotron stream: compute only the mel frames the encoder can consume
+    
+    step() recomputed the log-mel over the whole buffer, so a stream cost grew
+    with the square of its length. It now builds frames [consumed, limit) from
+    the samples they cover, keeps only the samples the next step can need, and
+    builds the window and filterbank once per session.
+    
+    Every frame matches the whole-buffer mel bit for bit:
+    - MLX's float RFFT packs rows (2i, 2i+1) into one complex FFT and an odd last
+      row with itself, so a slice starts on an even frame and ends on an even
+      frame or the last one.
+    - MLX runs (rows, 257) @ (257, 128) as split-K up to 257 rows, with a
+      partition count that depends on rows, and as the regular GEMM above. Slices
+      are zero-padded to 258 rows so they take the regular GEMM, whose K order
+      does not depend on the row count. Below 258 mel frames the session computes
+      the whole-buffer mel as before and does not trim the sample buffer.
+    - Frame counts use stft's formula; with hop > nFft the trim point is clamped
+      to the buffer.
+    Pre-emphasis, windowing and log are elementwise.
+    incrementalMelFramesMatchFullMelBitForBit checks 1 s to 90 s prefixes with
+    slices of 2, 30, 114 and 258 rows on Metal.
+    
+    * Nemotron stream: skip steps that cannot fill an encoder chunk
+    
+    When fewer than a chunk's mel frames are ready, streamEncodeChunks encodes nothing. The step now returns before computing the mel and rebuilding the transcript text, which gave an empty delta anyway.
+    
+    ---------
+    
+    Co-authored-by: Arvind Chembarpu <achembarpu@gmail.com>
+
+commit a6c7289237b149ec51e067220cc8738cc7303997
+Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
+Date:   Wed Oct 21 08:12:15 2026 -0700
+
+    VoxtralRealtime streaming encoder: write KV rows into preallocated storage (#272)
+    
+    Each streaming step concatenated the new keys and values onto the cached
+    window in every encoder layer, so every step copied up to slidingWindow rows
+    per layer. Each layer now has a cache that writes new rows with a slice
+    update, and attention reads the filled prefix: the same rows in the same
+    order. The storage grows 256 rows at a time up to the window. The session
+    resets the caches at each window boundary instead of dropping them, so the
+    next window reuses the storage.
+    
+    The encoder also casts the RoPE tables to the q/k dtype once per pass
+    instead of twice per layer.
+    
+    Voxtral Mini 4B Realtime on an M-series MacBook Pro, 2 minutes of speech in
+    100 ms steps: max MLX footprint (active plus cache) 5 191 -> 4 009 MB, mean
+    step unchanged at 61.7 ms, transcript byte-identical.
+
+commit a5506c1c7978aeea9a3295f83d43beff3f06bcdf
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Tue Oct 20 18:13:06 2026 +0200
+
+    Add translation example (#289)
+
+commit 219eeb287687a87691d9d092172dd51d0a10e6d8
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Tue Oct 20 17:32:56 2026 +0200
+
+    Add Gradium Phonon TTS model (#288)
+    
+    * Remove MLXLLM dependency.
+    
+    * Remove MLXLMCommon dependency.
+    
+    * Cleanup.
+    
+    * Add Gradium Phonon TTS model.
+
+commit 92ca66cf36dbd9c4c2206308cd181191619010e4
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 19 19:11:14 2026 +0200
+
+    Remove dependencies on MLXLMCommon / MLXLLM (#287)
+    
+    * Remove MLXLLM dependency.
+    
+    * Remove MLXLMCommon dependency.
+    
+    * Cleanup.
