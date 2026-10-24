@@ -4,7 +4,6 @@ import HuggingFace
 @preconcurrency import MLX
 import MLXAudioCodecs
 import MLXAudioCore
-import MLXLMCommon
 import MLXNN
 import Tokenizers
 
@@ -188,14 +187,16 @@ public extension MarvisTTSModel {
         // model downloads in one job and loads offline. Without it, fall back to the upstream
         // kyutai/moshiko-pytorch-bf16 fetch, which needs the network on first use.
         // `marvisLoadWeights` reads top-level files only, so `codec/` never reaches the LM.
-        // wangqi modified 2026-09-29
+        // Loads through upstream's `Mimi.fromModelDirectory` (no Hub contact), which replaced
+        // our `Mimi.fromWeightsFile` split.
+        // wangqi modified 2026-09-29, 2026-10-24
         let bundledCodecURL = modelDirectoryURL
             .appendingPathComponent("codec")
             .appendingPathComponent("tokenizer-e351c8d8-checkpoint125.safetensors")
         let codec: Mimi
         if FileManager.default.fileExists(atPath: bundledCodecURL.path) {
             print("[Marvis] Mimi codec from model folder: \(bundledCodecURL.path)")
-            codec = try Mimi.fromWeightsFile(bundledCodecURL)
+            codec = try Mimi.fromModelDirectory(bundledCodecURL.deletingLastPathComponent())
         } else {
             print("[Marvis] no codec/ in model folder; falling back to kyutai/moshiko-pytorch-bf16 (network on first use)")
             codec = try await Mimi.fromPretrained(cache: cache, progressHandler: progressHandler)

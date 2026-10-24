@@ -60,8 +60,7 @@ let package = Package(
 
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.30.6")),
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm.git", .upToNextMajor(from: "3.32.3")),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.32.3")),
         .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.1.6")),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", .upToNextMajor(from: "0.8.1"))
     ],
@@ -88,11 +87,11 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],
-            path: "Sources/MLXAudioCodecs"
+            path: "Sources/MLXAudioCodecs",
+            exclude: ["MiMoAudioTokenizer/README.md", "NemotronVoiceChat/README.md"]
         ),
 
         // MARK: - MLXAudioTTS
@@ -107,8 +106,6 @@ let package = Package(
                 .product(name: "MLXFFT", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],
@@ -141,8 +138,6 @@ let package = Package(
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],
@@ -150,13 +145,24 @@ let package = Package(
             exclude: [
                 "Models/CohereTranscribe/README.md",
                 "Models/FireRedASR2/README.md",
+                "Models/FunASRNano/README.md",
                 "Models/GLMASR/README.md",
+                "Models/HiggsAudio3/README.md",
                 "Models/GraniteSpeech/README.md",
+                "Models/GraniteSpeechNAR/README.md",
+                "Models/GraniteSpeech5CTC/README.md",
+                "Models/MegaASR/README.md",
+                "Models/MiMoASR/README.md",
+                "Models/MossMusic/README.md",
                 "Models/MossTranscribeDiarize/README.md",
                 "Models/NemotronASR/README.md",
                 "Models/Parakeet/README.md",
+                "Models/Phonon2/README.md",
+                "Models/Qwen2Audio/README.md",
                 "Models/Qwen3ASR/README.md",
                 "Models/SenseVoice/README.md",
+                "Models/VibeVoiceASR/README.md",
+                "Models/Voxtral/README.md",
                 "Models/VoxtralRealtime/README.md",
                 "Models/Whisper/README.md",
             ]
@@ -169,7 +175,6 @@ let package = Package(
                 "MLXAudioCore",
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
             ],
             path: "Sources/MLXAudioVAD",
@@ -207,8 +212,6 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXFast", package: "mlx-swift"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],

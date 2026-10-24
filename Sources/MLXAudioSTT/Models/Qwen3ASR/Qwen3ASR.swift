@@ -9,7 +9,6 @@ import Foundation
 import MLX
 import MLXNN
 import MLXAudioCore
-import MLXLMCommon
 import HuggingFace
 import Tokenizers
 
@@ -1354,6 +1353,7 @@ public class Qwen3ASRModel: Module {
     // MARK: - Generation
 
     /// Generate transcription from audio, automatically chunking long audio at low-energy boundaries.
+    /// `maxTokens` caps each chunk's decode, not the whole file, so long audio is never cut short.
     public func generate(
         audio: MLXArray,
         maxTokens: Int = 8192,
@@ -1380,17 +1380,14 @@ public class Qwen3ASRModel: Module {
         var segments: [[String: Any]] = []
         var totalPromptTokens = 0
         var totalGenerationTokens = 0
-        var remainingTokens = maxTokens
         var chunkLanguages: [String?] = []
 
         for (chunkAudio, offsetSec) in chunks {
-            if remainingTokens <= 0 { break }
-
             let actualChunkDuration = Float(chunkAudio.dim(0)) / Float(sampleRate)
 
             let result = generateSingleChunk(
                 audio: chunkAudio,
-                maxTokens: remainingTokens,
+                maxTokens: maxTokens,
                 temperature: temperature,
                 context: context,
                 language: forcedLanguage,
@@ -1402,7 +1399,6 @@ public class Qwen3ASRModel: Module {
             chunkLanguages.append(result.language)
             totalPromptTokens += result.promptTokens
             totalGenerationTokens += result.generationTokens
-            remainingTokens -= result.generationTokens
 
             var segment: [String: Any] = [
                 "text": result.text,
@@ -1437,6 +1433,7 @@ public class Qwen3ASRModel: Module {
     }
 
     /// Generate transcription with streaming output, automatically chunking long audio.
+    /// `maxTokens` caps each chunk's decode, as in `generate`.
     public func generateStream(
         audio: MLXArray,
         maxTokens: Int = 8192,
@@ -1472,12 +1469,10 @@ public class Qwen3ASRModel: Module {
 
                     var totalPromptTokens = 0
                     var totalGenerationTokens = 0
-                    var remainingTokens = maxTokens
                     var allGeneratedTokens: [Int] = []
                     var resolvedLanguage = language
 
                     for (chunkAudio, _) in chunks {
-                        if remainingTokens <= 0 { break }
                         try Task.checkCancellation()
 
                         // Preprocess this chunk
@@ -1514,7 +1509,7 @@ public class Qwen3ASRModel: Module {
                         var chunkTokens: [Int] = []
                         var languagePrefixBuffer = ""
 
-                        for _ in 0..<remainingTokens {
+                        for _ in 0..<maxTokens {
                             try Task.checkCancellation()
 
                             var lastLogits = logits[0..., -1, 0...]
@@ -1576,7 +1571,6 @@ public class Qwen3ASRModel: Module {
                         }
 
                         totalGenerationTokens += chunkTokens.count
-                        remainingTokens -= chunkTokens.count
 
                         if resolvedLanguage == nil && !languagePrefixBuffer.isEmpty {
                             continuation.yield(.token(languagePrefixBuffer))

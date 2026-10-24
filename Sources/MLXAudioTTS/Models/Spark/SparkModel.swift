@@ -1,9 +1,7 @@
 import Foundation
 import HuggingFace
 @preconcurrency import MLX
-@preconcurrency import MLXLLM
-@preconcurrency import MLXLMCommon
-import MLXAudioCore
+@preconcurrency import MLXAudioCore
 import MLXNN
 import Tokenizers
 
@@ -144,9 +142,7 @@ public final class SparkModel: SpeechGenerationModel, @unchecked Sendable {
             let gender: SparkGender = (voice?.lowercased() == "male") ? .male : .female
             prompt = SparkPrompt.control(gender: gender, pitch: .moderate, speed: .moderate, text: text)
         }
-        // Upstream made `encode` and `newCache` throwing in the tag-20260918 merge; same class of
-        // adaptation as `56770f3` for CSMModel's `makePromptCache`. // wangqi modified 2026-09-18
-        let promptIds = try tokenizer.encode(text: prompt, addSpecialTokens: false)
+        let promptIds = tokenizer.encode(text: prompt, addSpecialTokens: false)
         let inputIds = MLXArray(promptIds.map { Int32($0) }).reshaped([1, promptIds.count])
 
         let cache = try backbone.newCache(parameters: generationParameters)

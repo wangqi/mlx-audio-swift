@@ -4,7 +4,6 @@ import MLX
 import MLXNN
 import MLXAudioCore
 import MLXAudioVAD
-import MLXLMCommon
 
 private struct CoherePrefillContext {
     let adapterOut: MLXArray
@@ -961,7 +960,10 @@ public extension CohereTranscribeModel {
         return model
     }
 
-    static func fromPretrained(_ modelPath: String) async throws -> CohereTranscribeModel {
+    static func fromPretrained(
+        _ modelPath: String,
+        cache: HubCache = .default
+    ) async throws -> CohereTranscribeModel {
         let hfToken: String? = ProcessInfo.processInfo.environment["HF_TOKEN"]
             ?? Bundle.main.object(forInfoDictionaryKey: "HF_TOKEN") as? String
 
@@ -977,7 +979,8 @@ public extension CohereTranscribeModel {
             repoID: repoID,
             requiredExtension: "safetensors",
             additionalMatchingPatterns: ["*.model"],
-            hfToken: hfToken
+            hfToken: hfToken,
+            cache: cache
         )
 
         let model = try fromDirectory(modelDir)

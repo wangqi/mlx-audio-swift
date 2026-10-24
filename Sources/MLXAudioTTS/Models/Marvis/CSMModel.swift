@@ -2,10 +2,9 @@
 import Foundation
 import Hub
 import MLX
-import MLXLMCommon
+import MLXAudioCore
 import MLXNN
-// Tokenizers import removed — unused in this file, causes ambiguity with MLXLMCommon.Tokenizer
-// wangqi modified 2026-04-03
+import Tokenizers
 
 // MARK: - Configs
 
