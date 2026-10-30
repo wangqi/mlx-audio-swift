@@ -1,628 +1,552 @@
-commit 6fd938669e45412f5c35e011e7086ecd20397dbd
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Sat Oct 24 19:23:22 2026 +0200
+commit d4fa7be1c2fef65ed13a4f73bd58e0a23a0ba307
+Author: ahuzmeza <32289581+ahuzmeza@users.noreply.github.com>
+Date:   Fri Oct 30 21:10:09 2026 +0200
 
-    Add MOSS-Music support (#313)
-
-commit e89b6c95cc507e9b162bae0288fa4fee8634d199
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Sat Oct 24 18:23:07 2026 +0200
-
-    Add Ming 3.0 ASR Tiny model (#312)
-    
-    * Add Ming 3.0 ASR Tiny support
-    
-    * Simplify Ming license comments
-    
-    * Make Ming tests compile with Xcode 26.6
-
-commit d8e2cafea891928075d3c8577b1a05b99396594e
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Sat Oct 24 01:18:29 2026 +0200
-
-    Add MiMo ASR support (#311)
-
-commit 949be25cd97e33e933334597340bbe9786612142
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Sat Oct 24 00:11:38 2026 +0200
-
-    Add VibeVoice ASR support (#309)
-
-commit 4ce41465867edd7ec1b55faea3b2309db15768ca
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 23:03:15 2026 +0200
-
-    Add offline Voxtral Mini support (#308)
-
-commit 1e1dc5fd90135715fb9bf79382d3bba15b464c23
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 22:14:52 2026 +0200
-
-    Add Qwen2-Audio model (#306)
-    
-    * Add Qwen2-Audio support
-    
-    * Allow cold Metal initialization in cache tests
-
-commit 0cd69c01e47d68e4293777a685f99e51bfe38178
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Fri Oct 23 13:01:39 2026 -0700
-
-    TTS: Kokoro and Kitten text processors use the loadModel cache (#307)
-    
-    MisakiTextProcessor and KokoroMultilingualProcessor downloaded the
-    English G2P model, the lexicons and the neural G2P model into
-    HubCache.default, whatever cache was passed to TTS.loadModel. Both now
-    take an optional cache, and TTS.loadModel builds the default processors
-    with its own.
-    
-    Fixes #242
-
-commit 902920c5042322dd69b6d3aa9b6a5c22c19919d8
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 19:05:04 2026 +0200
-
-    Add MiMo codec (#305)
-    
-    * Share codec loading and preserve reconstruction audio metadata
-    
-    * Register MiMo in shared codec loading and the codec CLI
-    
-    * Add the MiMo audio tokenizer and waveform decoder
-    
-    * Record shared codec integration and parity build guidance
-
-commit 346be683371378630efa9769dd338a7b6b4e739c
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 18:38:59 2026 +0200
-
-    Add Nemotron-VoiceChat codec (#304)
-    
-    * Share codec loading and preserve reconstruction audio metadata
-    
-    * Register Nemotron in shared codec loading and the codec CLI
-    
-    * Add the Nemotron VoiceChat audio codec
-    
-    * Record shared codec integration and parity build guidance
-
-commit 9162db0f7e8787556cd4288115b2ff7984a49753
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 18:38:49 2026 +0200
-
-    Add Granite Speech 4.1 and 5.0 support (#303)
-    
-    Signed-off-by: Lucas Newman <lucasnewman@me.com>
-
-commit 654d4d81a3dae4106f7bf7c1de3788c9847586e7
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Fri Oct 23 09:28:04 2026 -0700
-
-    Core: reuse a cached snapshot that has no config.json (#296)
-    
-    The cache check required config.json before it looked at the snapshot
-    manifest, so a repo that ships none (kitten-tts-g2p ships
-    us_bart_config.json) lost its manifest and was fetched again on every
-    load, and never resolved offline. When config.json is absent, the
-    manifest now decides completeness on its own.
-    
-    Refs #242
-
-commit 013853a70b7c657256e748ff9527e5817f6f1b31
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Fri Oct 23 00:07:24 2026 +0200
-
-    Add Parakeet Redux STT model (#302)
-    
-    * Add Parakeet Redux support
-    
-    * Load published Parakeet Redux checkpoints directly
-
-commit 0f7a622c1947ba044b6502fdd6343b01d3ddfc34
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Thu Oct 22 23:04:09 2026 +0200
-
-    Add Higgs Audio v3 STT model (#301)
-    
-    * Fix partial model downloads returning as valid from the HF cache.
-    
-    * Add native Higgs-Audio v3 STT inference and parity tests
-    
-    * docs: make Higgs-Audio v3 STT README user-facing
-    
-    * test: embed tiny Higgs config and remove validation scripts
-    
-    * Make Higgs transcription tests self-contained
-    
-    * Use Swift examples in the Higgs README
-    
-    * Unify Higgs-Audio generation and keep controls in Swift
-    
-    * Use fixed-duration chunks for Higgs transcription
-    
-    * Simplify Higgs model loading
-
-commit 262a391a6a63c2e6923e826bcc7122caee0f18f6
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Thu Oct 22 22:48:02 2026 +0200
-
-    Add Fun-ASR-Nano STT model (#300)
-    
-    * Fix partial model downloads returning as valid from the HF cache.
-    
-    * Add native Fun-ASR-Nano speech recognition
-    
-    * docs: make Fun-ASR-Nano README user-facing
-    
-    * test: simplify Fun-ASR-Nano fixtures and remove validation scripts
-    
-    * Make Fun-ASR-Nano tests self-contained
-    
-    * Use Swift examples in the Fun-ASR-Nano README
-    
-    * Remove the context option from the STT CLI
-    
-    * Unify Fun-ASR generation and simplify the STT CLI
-    
-    ---------
-    
-    Signed-off-by: Lucas Newman <lucasnewman@me.com>
-
-commit 2e32b496bfc8ab00b1f448216d804617049180d7
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Thu Oct 22 20:51:53 2026 +0200
-
-    Add Granite Speech TurboCTC STT model (#298)
-    
-    * Fix partial model downloads returning as valid from the HF cache.
-    
-    * Add native Granite Speech 5 TurboCTC inference and parity tests
-    
-    * docs: make Granite TurboCTC README user-facing
-    
-    * test: embed tiny Granite CTC config and remove validation script
-    
-    * Remove retained Granite CTC test tensors
-    
-    * Use Swift examples in the Granite CTC README
-    
-    * Use generate for Granite TurboCTC transcription
-
-commit 1e35e17319b35c8313878cb7f2712f23e4f27eff
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Thu Oct 22 11:51:17 2026 -0700
-
-    Whisper: add a translate task to STTGenerateParameters (#295)
-    
-    The Whisper tokenizer already builds the translate prompt, but generate
-    always asked for "transcribe", and STTGenerateParameters had no way to
-    ask for anything else. It now has `task` ("transcribe" by default,
-    "translate" for X-to-English), which Whisper passes to its prompt, and
-    the STT CLI takes --task. Other models ignore it.
-    
-    Refs #173
-
-commit 14b634e866e597b7e4f4c9f30ad106f5af016a4c
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Thu Oct 22 20:45:24 2026 +0200
-
-    Add Phonon 2 STT model (#297)
-    
-    * Fix partial model downloads returning as valid from the HF cache.
-    
-    * Add native Phonon-2 STT support and parity tests
-    
-    * docs: make Phonon-2 README user-facing
-    
-    * docs: replace embedded Phonon-2 license with README note
-    
-    * Remove file.
-    
-    * test: embed tiny Phonon-2 config
-    
-    * Remove retained Phonon-2 test tensors
-    
-    * Use Swift examples in the Phonon-2 README
-
-commit 8a34adc26b7e8e14f585f39137f8f1c647ed4e8e
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Thu Oct 22 20:31:08 2026 +0200
-
-    Add Mega-ASR model (#299)
-    
-    * Fix partial model downloads returning as valid from the HF cache.
-    
-    * Add native Mega-ASR routed transcription
-    
-    * docs: make Mega-ASR README user-facing
-    
-    * test: remove Mega-ASR validation scripts
-    
-    * Replace Mega-ASR tensor fixtures with generated test data
-    
-    * Use Swift examples in the Mega-ASR README
-    
-    * Default to automatic routing in the STT CLI
-    
-    * Remove the context option from the STT CLI
-    
-    * Centralize local checkpoint loading in the STT loader
-    
-    * Add a shared throwing STT generation entrypoint
-    
-    * Simplify STT generation and defer throwing errors
-
-commit 19f2296420c875b4f782825c5f5fcb554ed87e38
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Thu Oct 22 08:16:38 2026 -0700
-
-    Qwen3-ASR: cap maxTokens per chunk, not per file (#294)
-    
-    generate and generateStream spent one maxTokens budget across all chunks
-    and stopped once it ran out, so long audio lost its later chunks with no
-    segment and nothing in STTOutput to say so. maxTokens now caps each
-    chunk's decode, as MOSS already does, so the 8192 default bounds one
-    chunk.
-    
-    Fixes #248
-
-commit 5c4c12b699234f55d1816dfdb36f7016086a49bb
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 16:24:36 2026 -0700
-
-    STT: forward the loadModel cache to the six loaders that dropped it (#293)
-    
-    * STT: forward the loader's cache to six more fromPretrained
-    
-    VoxtralRealtime, Cohere, Canary, Wav2Vec2, LASR and Moonshine took no
-    cache, so STT.loadModel(modelRepo:cache:) read config.json from the
-    supplied cache and then downloaded the whole model again into
-    HubCache.default. Each now takes cache: HubCache = .default and passes it
-    to resolveOrDownloadModel.
-    
-    Fixes #279
-    
-    * Drop the STT loader cache test
-    
-    It needed a hand-written copy of ModelUtils' snapshot listing and asserted
-    through a decoding error; the change is plain argument forwarding.
-
-commit 865963e3880236d64c426037816b218cb6c159a8
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 15:18:00 2026 -0700
-
-    Build against mlx-swift main (#469): Parakeet and Qwen3-TTS compile calls (#292)
-    
-    * Parakeet: store compiled closures without @Sendable
-    
-    mlx-swift#469 changed compile(inputs:) to return a non-Sendable closure,
-    because the closure captures the modules passed as inputs. ParakeetModel
-    stored both compiled closures as @Sendable, so main stops compiling at
-    ParakeetModel.swift:326 and :909 against mlx-swift main. Package.swift
-    accepts any 0.x from 0.32.3, so the next mlx-swift release would break
-    every fresh resolve.
-    
-    Neither closure leaves the model, so the annotation bought nothing.
-    Dropping it builds against both 0.32.3 and mlx-swift main.
-    
-    * Qwen3-TTS: call MLX.compile for the SwiGLU kernels
-    
-    mlx-swift#469 added compile(shapeless:_:) for two-argument @Sendable
-    closures to MLX, with the same signature as MLXAudioCore's compile shim.
-    Qwen3TTSCodePredictor.swift:9 and Qwen3TTSTalker.swift:34 import both
-    modules, so against mlx-swift main the bare call is ambiguous and
-    MLXAudioTTS stops compiling. Naming MLX picks the same function the shim
-    forwards to, on 0.32.3 and on main.
-
-commit b7dd2e0c93065d15c860864ba3cbccab565f4d07
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 15:17:46 2026 -0700
-
-    Nemotron streaming: reuse decoder and encoder work that has not changed (#275)
-    
-    * Nemotron RNN-T decode: reuse the prediction network output on blank frames
-    
-    The prediction network output, its proposed LSTM state and the joint's pred
-    projection depend only on (lastToken, decoderState), which change only on
-    emission. Cache them and clear the cache on every emission, so a blank frame
-    costs one enc projection and the joint output layer instead of an LSTM step too.
-    Applies to the stream decode and the offline decode; the offline loop also
-    drops the eval before .item(), which already evaluates the joint output.
-    
-    Idea from achembarpu (be2beeb, a60b91a). His cache was keyed on lastToken,
-    which reuses a stale output when the same token is emitted twice in a row;
-    clearing on emission avoids that.
-    
-    * Nemotron stream encoder: build per-chunk invariants once
-    
-    posEnc depends only on chunk length, cache length and dtype, which are the
-    same for every layer within a chunk, so layers share one embedding. The
-    prompt one-hot depends only on (batch, chunk length, dtype, prompt index), so
-    the stream state reuses it for every whole chunk. The 0.5 residual scale is
-    cast once per chunk instead of twice per layer, recast if a layer's dtype
-    differs. Same values, same ops downstream.
-    
-    * Nemotron streaming: skip the text rebuild when a step emits no token
-    
-    The full text is rebuilt from every token so far after each step and chunk,
-    so a long session costs O(tokens) host work per step. With no new token the
-    rebuilt text equals the previous one and the delta is empty, so skip it.
-    
-    * Nemotron RNN-T stream decode: read tokens for 4 frames per host sync
-    
-    With the prediction cached, the tokens of the next frames only depend on
-    their encoder frame until an emission. Build each frame's joint and argmax
-    as before (separate M=1 ops, same inputs), read up to 4 of them back with one
-    asArray instead of one .item() per frame, and drop the rest on emission.
-    Blank runs need a quarter of the syncs; an emission wastes at most 3 joint
-    evaluations.
-    
-    * Nemotron streaming: cache segments with the text; one optional for the prediction cache
-    
-    The segments getter rebuilt every sentence on each access. The alignment is
-    now rebuilt only when a step adds a token, and segments are built once from
-    it. The stream prediction cache is one optional tuple, like the offline one,
-    and the offline loop drops its force unwraps.
-    
-    * Test: Nemotron stream RNN-T decode matches per-frame recompute
-    
-    The per-frame reference recomputes the prediction network on every frame.
-    The random tiny model can predict blank everywhere or nowhere, so a seeded
-    calibration shifts the joint's blank bias and pushes special tokens down
-    until the reference has blank frames, emitted tokens and a frame with 2+
-    symbols. Covers emissions inside a 4-frame sync batch and a short last batch.
-    The offline decode must match the cache-aware stream; that test only needs
-    blank frames and emitted tokens, since no bias shift gave a 2+ symbol frame
-    for the bf16 offline input on Metal CI.
-    
-    * Nemotron streaming: evaluate the cached prompt one-hot; say why the cached prediction isn't
-
-commit 0ef2fed020b66bafdea3a9c5018247e9778676bd
-Author: Lucas Newman <lucasnewman@me.com>
-Date:   Wed Oct 21 23:58:54 2026 +0200
-
-    Fix partial model downloads returning as valid from the HF cache. (#291)
-
-commit 00abb7fa90df4339ec75fc6b478449bafb222cf8
-Author: John Paul Soliva <soliva.johnpaul@icloud.com>
-Date:   Thu Oct 22 06:53:21 2026 +0900
-
-    Irodori-TTS: add v4.1 and v4.1-MF (MeanFlow) support (#284)
-    
-    * Irodori-TTS: decode v4 / v4.1-MF config fields
-    
-    Add flow_parameterization (meanflow), the pretrained text encoder fields
-    (text_encoder_type/revision/config, pretrained_projector_*), the embedded
-    ModernBERT config (flat or transformers>=5 nested RoPE thetas) and
-    ref_max_seconds. ref_max_seconds stays nil when a config omits it, so v1-v3
-    reference handling is unchanged; v3 configs decode exactly as before.
-    
-    Mirrors yoshphys's Python port in Blaizzy/mlx-audio (98a021d0, b3cb138f).
-    
-    * Irodori-TTS: add ModernBERT encoder for v4
-    
-    Swift port of mlx_audio irodori_tts/modernbert.py: bidirectional
-    ModernBERT (global attention every 3rd layer, sliding window elsewhere,
-    separate global/local RoPE thetas in rotate_half form, GeGLU MLP, bias-free
-    float32-accumulating LayerNorm). Property names follow the checkpoint's
-    pretrained_text_backbone.backbone.* keys after camelCase sanitizing.
-    
-    With Python's padded inputs the hidden states of the 25-layer
-    modernbert-ja-310m backbone are bit-identical to the Python port.
-    
-    * Irodori-TTS: v4 text/caption projectors and MeanFlow conditioning in the DiT
-    
-    v4 replaces the scratch text and caption encoders with the shared
-    pretrained ModernBERT backbone plus per-condition linear/residual_mlp
-    projectors. MeanFlow checkpoints add delta_cond_module, an interval-length
-    (t - r) embedding summed into the timestep conditioning; forwardWithConditions
-    takes deltaT and rejects it for RF-velocity models, as upstream does.
-    
-    * Irodori-TTS: add MeanFlow sampler and upstream CFG gating
-    
-    irodoriSampleEulerMeanFlow: linear 1->0 schedule, one conditional forward
-    per step with delta_t = t - t_next, no CFG (v4.1-MF, 4 steps).
-    
-    The CFG sampler now skips caption guidance when the caption mask is empty
-    and lets caption guidance alone enable CFG (upstream a8e51b42). Both
-    samplers accept pre-encoded conditions so the encoders run once per
-    utterance, and an optional initial noise for parity testing.
-    
-    * Irodori-TTS: load and run v4.1 / v4.1-MF checkpoints
-    
-    - Load the tokenizer bundled under tokenizer/ (sanitized copy in Caches;
-      the downloaded files are not modified) and download it with the model.
-    - v4 uses the upstream text normaliser (keeps 。/、, folds .., NFKC,
-      depth-aware bracket stripping); v1-v3 keep the existing normaliser.
-    - v4 drops token padding before the encoder; padded keys were masked
-      everywhere, so this only removes work.
-    - Encode conditions once and share them between duration prediction and
-      the sampler (v3 output is bit-identical).
-    - The zero-reference placeholder spans one full speaker patch; with v4's
-      speaker_patch_size 4 it previously patched to an empty sequence.
-    - Strip the caption and mask an empty one (upstream a9754f4d, 0e846d23);
-      for v3 this only changes an empty or whitespace-padded voice string.
-    - Cap reference audio at ref_max_seconds when the config sets it.
-    - Expose per-phase timings as lastTimings.
-    
-    Based on yoshphys's Python v4 / MeanFlow port in Blaizzy/mlx-audio
-    (98a021d0, 0e846d23, a8e51b42, a9754f4d, ece79de8, b3cb138f).
-    
-    * Irodori-TTS: add v4 / MeanFlow unit tests
-    
-    Offline tests on tiny configurations, with goldens produced by the Python
-    mlx-audio implementation: v4.1-MF and v3 config decoding, ModernBERT
-    forward (key mask + sliding window), the MeanFlow sampler, the zero
-    reference with speaker patch size 4, and the upstream normaliser.
-    
-    * Irodori-TTS: document v4.1 and v4.1-MF
-    
-    * Fix Irodori tokenizer cache races and portable parity tests
-    
-    * Normalize published Irodori tokenizer cache URLs
+    Qwen3-TTS: fix the upsample bias counted twice at chunk joins (#350)
+    
+    * Qwen3-TTS: count the upsample bias once when streaming decode joins chunks
+    
+    DecoderBlockUpsample.step carries the transposed conv's last kernel-stride
+    outputs into the next chunk and adds them to that chunk's head. Both already
+    include the conv bias, so every chunk join got it twice and the audio just
+    after each join came out wrong. generateStream joins chunks throughout, and
+    generate() decodes in 300-token chunks, so any clip over 24 s has joins too.
+    On the 1.7B Base 8-bit model, codes of Tests/media/conversational_a.wav
+    decoded in 25-token chunks differed from a full decode by up to 0.66 (SNR 24
+    dB); with the fix the largest difference is 1.8e-5 (SNR 111 dB).
+    
+    The test decodes six frames in full and in three streaming steps with
+    nonzero biases and expects the same samples.
+    
+    * Make STT stream tests independent of scheduler timing
     
     ---------
     
     Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-commit e2ecced3bfbd88546d314b7d7c09180b90d73b74
+commit db17febdbc1c6dea25e12f6762578d4e31f6ff70
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Wed Oct 21 23:47:14 2026 +0200
+Date:   Fri Oct 30 16:49:45 2026 +0100
 
-    Fix speaking rate in non-streaming Qwen3-TTS generation. (#290)
+    Fix blocking behavior when streaming with STT models. (#349)
 
-commit ba6e46c10b8b1a50cb0a4f81bcd4f20be6dc316d
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 14:44:15 2026 -0700
+commit 0e55a69971cf2ed390809ffc3489d8031511943b
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Fri Oct 30 16:25:14 2026 +0100
 
-    VoxtralRealtime generateStream: build deltas from token bytes (#273)
+    Add Nemotron 3.5 Transcribe STT model (#348)
     
-    * VoxtralRealtime generateStream: build deltas from token bytes
+    * Share expert projections between speech models
     
-    generateStream re-decoded the whole transcript on every token to find the
-    new text, so a stream of n tokens cost O(n^2) decoding. It now appends each
-    token's bytes to VoxtralRealtimeTranscriptText, as the stream session does,
-    and yields the same deltas, including for tokens that split a multi-byte
-    character.
+    * Add native Nemotron 3.5 Transcribe speech recognition
     
-    The decode loops also take the argmax together with the decoder step, one
-    GPU sync per token instead of two; build the RoPE inverse frequencies once
-    at init instead of on every forward pass; and skip the decoder pass after
-    the last position, whose prediction nothing reads. Token ids are unchanged.
-    
-    * VoxtralRealtime: address review on #273
-    
-    evalPrediction's callers all pass one row from decoder.logits, and
-    argMax(axis: -1) gives a single element for [vocab] and [1, vocab]
-    alike, so the rank check goes. ropeInvFreq now evaluates the array it
-    returns, since the decoder caches it.
+    * Load official Nemotron checkpoints and add word timestamps
 
-commit d36caf92e125db11308b81ffd983b4504e24551c
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 14:37:43 2026 -0700
+commit 84b74901fc8510a8e79b092363cb7b1077c7db63
+Author: Peter Huszak <petik3@gmail.com>
+Date:   Fri Oct 30 05:10:16 2026 +0100
 
-    VoxtralRealtime streaming: reuse the mel Hann window instead of rebuilding it per append (#271)
+    Add OmniVoice 8-bit and voice-cloning helpers (#335)
     
-    * perf: reuse the Voxtral streaming Hann window
+    * Add optimized OmniVoice 8-bit checkpoint support
     
-    melColumns rebuilt the 400-point window on every append: an arange, a cast,
-    a cosine and two arithmetic ops per 100 ms of audio. Hoist it into
-    periodicHannWindow(size:) and cache one on VoxtralRealtimeMelStream.
+    * Expose OmniVoice voice cloning audio helpers
     
-    [tom: made the window parameter required rather than optional, which leaves
-    melColumns with one code path and makes its windowSize parameter dead]
-    
-    * test(voxtral): cover the periodic Hann window definition
-    
-    Checks periodicHannWindow against the formula and asserts the last sample is
-    non-zero, which a symmetric N-1 window would not satisfy.
-    
-    * test(voxtral): add an opt-in benchmark for the window rebuild
-    
-    Times melColumns with a rebuilt window against a reused one in one process,
-    plus a full melStream.append for the denominator. Off unless
-    VOXTRAL_MEL_BENCH=1, and it needs xcodebuild: swift test has no metallib.
-    
-    * VoxtralRealtime: evaluate the Hann window when it is built
-    
-    The mel stream keeps the window for the whole session; evaluating it in
-    periodicHannWindow means the first append doesn't pay for building it.
+    * Preserve packed weights when loading OmniVoice checkpoints
     
     ---------
     
-    Co-authored-by: Arvind Chembarpu <achembarpu@gmail.com>
+    Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-commit 624fd5410b2fc8ea06f955500c9ac078e405261f
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 08:18:36 2026 -0700
+commit 15d82230bc4c19138f91c7cf857c5def75c79bce
+Author: ahuzmeza <32289581+ahuzmeza@users.noreply.github.com>
+Date:   Fri Oct 30 06:07:28 2026 +0200
 
-    Nemotron streaming: compute only new mel frames; keep MLX's buffer cache between steps (#274)
+    Parakeet generateStream: stream only text a later merge can't change (#346)
     
-    * Nemotron stream: keep MLX's buffer cache between steps
+    generateStream yields the text that follows the previously emitted text.
+    When the next chunk's merge revises the last emitted words, hasPrefix
+    fails and the whole transcript is yielded again, so a consumer that
+    appends tokens gets it twice. On a 72 s clip (the CLI's 30 s chunks,
+    1 s overlap) one chunk ended on "rang", the model wrote "rang.", and
+    the next chunk revised it to "rang seven times,".
     
-    advance() called Memory.clearCache() after every step, so each step handed
-    its buffers back to Metal and allocated them again. Steps now reuse the
-    cached buffers; the cache is cleared once when the stream finishes.
+    Both merges keep unchanged the leading run of tokens that end by the
+    incoming chunk's start minus the overlap. So after each merge, stream
+    only that run for the next chunk; the last chunk streams the rest. The
+    streamed text now equals the final .result text. Tokens from the last
+    2 s of each chunk are sent with a later chunk (the next one at 5 s
+    chunks and up).
     
-    * Nemotron stream: compute only the mel frames the encoder can consume
+    parakeet-tdt-0.6b-v3, STT CLI --stream, words streamed before -> after:
+      72 s clip, 30 s chunks: 440 -> 242 (final 242)
+      88 s clip, 30 s chunks: 261 -> 182 (final 182)
+      72 s clip,  5 s chunks: 485 -> 210 (final 210)
+      88 s clip,  5 s chunks: 275 -> 151 (final 151)
+    Streamed text equals the final text byte for byte in all four, at
+    1.5 s chunks and on a 20 s single-chunk clip; final text unchanged.
+
+commit d08558975ef219e5ed38c71fe2522cc03167899f
+Author: ahuzmeza <32289581+ahuzmeza@users.noreply.github.com>
+Date:   Thu Oct 29 21:18:53 2026 +0200
+
+    Whisper: fix words lost at the 30 s cuts in long audio (#345)
     
-    step() recomputed the log-mel over the whole buffer, so a stream cost grew
-    with the square of its length. It now builds frames [consumed, limit) from
-    the samples they cover, keeps only the samples the next step can need, and
-    builds the window and filterbank once per session.
+    * Whisper: fix words lost at the 30 s cuts in long audio
     
-    Every frame matches the whole-buffer mel bit for bit:
-    - MLX's float RFFT packs rows (2i, 2i+1) into one complex FFT and an odd last
-      row with itself, so a slice starts on an even frame and ends on an even
-      frame or the last one.
-    - MLX runs (rows, 257) @ (257, 128) as split-K up to 257 rows, with a
-      partition count that depends on rows, and as the regular GEMM above. Slices
-      are zero-padded to 258 rows so they take the regular GEMM, whose K order
-      does not depend on the row count. Below 258 mel frames the session computes
-      the whole-buffer mel as before and does not trim the sample buffer.
-    - Frame counts use stft's formula; with hop > nFft the trim point is clamped
-      to the buffer.
-    Pre-emphasis, windowing and log are elementwise.
-    incrementalMelFramesMatchFullMelBitForBit checks 1 s to 90 s prefixes with
-    slices of 2, 30, 114 and 258 rows on Metal.
+    Whisper listens to 30 s of audio at a time. For longer audio, the Swift port cut the file at 30 s, 60 s, 90 s… and transcribed each piece on its own, so words that crossed a cut were lost or garbled. A piece that started mid-sentence could come back almost empty: on an 88 s clip, the second piece returned one of its five sentences.
     
-    * Nemotron stream: skip steps that cannot fill an encoder chunk
+    This PR uses the method OpenAI Whisper uses for long audio (`transcribe()` in openai/whisper), which Python mlx-audio's Whisper also follows (`mlx_audio/stt/models/whisper/whisper.py`). Whisper splits what it hears into segments, usually a sentence or a phrase, and marks where each one starts and ends with a timestamp. A 30 s window keeps only the segments that finish inside it, and the next window starts where the last finished segment ended. Speech cut off at the edge of one window is heard again, whole, in the next.
     
-    When fewer than a chunk's mel frames are ready, streamEncodeChunks encodes nothing. The step now returns before computing the mel and rebuilding the transcript text, which gave an empty delta anyway.
+    For example, a window comes back as
+    
+        <|0.00|> The bus was late.<|6.00|><|6.00|> We walked home.<|14.20|><|14.20|> Then it started to ra
+    
+    The first two segments are kept (0–6.00 s and 6.00–14.20 s). "Then it started to ra" has no end mark, so it is dropped and the next window starts at 14.20 s, where "Then it started to rain" is heard whole.
+    
+    Edge cases:
+    - If a window's last segment has an end mark and nothing follows it, nothing is redone: the next window starts where this window ends.
+    - If a window holds only one segment, it is kept whole and the next window starts where this window ends.
+    - The loop always moves forward: a segment always ends after it starts, and if the next start would not move, the loop skips a full window ahead.
+    
+    What else changes for audio over 30 s: each entry in `STTOutput.segments` is one segment with its real start and end time, and streaming sends each segment once it is finished, instead of word by word. Audio up to 30 s works as before; on five such clips the text, segments and token counts are identical. Left out, because the Swift decoder did not have them before either: feeding the previous text back in as context, retrying when the output looks wrong, and skipping silent windows. The audio features are still computed per window, not once for the whole file.
+    
+    Results (whisper-large-v3-turbo, English, Release build, Mac mini M2 Pro). Word error rate = wrong, missing and extra words per word of the script, lower is better:
+    - 72 s clip, 242 words (macOS `say`): 7.0% → 0.8%. Before, the phrases at 30 s and 60 s were missing.
+    - 88 s clip, 225 words (5 sentences repeated 3 times): 32.0% → 7.1%.
+    - The `mlx-whisper` Python package on the same clips, same method (previous-text context off): 0.8% and 6.7%. The only difference is one extra word at a spot both mishear.
+    - Speed on the 88 s clip, including model load, 3 runs: 4.38–4.50 s → 6.02–6.03 s, for one more window and the timestamps.
+    
+    Tests: where Whisper may place timestamps, and how a window is split and where the next one starts (the normal case, a window ending on a finished segment, a window with one segment). 971 tests pass. The Whisper README's note on long audio now describes this.
+    
+    * Preserve tokenizer spacing across Whisper segments
     
     ---------
     
-    Co-authored-by: Arvind Chembarpu <achembarpu@gmail.com>
+    Co-authored-by: Lucas Newman <lucasnewman@me.com>
 
-commit a6c7289237b149ec51e067220cc8738cc7303997
-Author: Tom Vaucourt <34662901+T0mSIlver@users.noreply.github.com>
-Date:   Wed Oct 21 08:12:15 2026 -0700
-
-    VoxtralRealtime streaming encoder: write KV rows into preallocated storage (#272)
-    
-    Each streaming step concatenated the new keys and values onto the cached
-    window in every encoder layer, so every step copied up to slidingWindow rows
-    per layer. Each layer now has a cache that writes new rows with a slice
-    update, and attention reads the filled prefix: the same rows in the same
-    order. The storage grows 256 rows at a time up to the window. The session
-    resets the caches at each window boundary instead of dropping them, so the
-    next window reuses the storage.
-    
-    The encoder also casts the RoPE tables to the q/k dtype once per pass
-    instead of twice per layer.
-    
-    Voxtral Mini 4B Realtime on an M-series MacBook Pro, 2 minutes of speech in
-    100 ms steps: max MLX footprint (active plus cache) 5 191 -> 4 009 MB, mean
-    step unchanged at 61.7 ms, transcript byte-identical.
-
-commit a5506c1c7978aeea9a3295f83d43beff3f06bcdf
+commit 00b441a876e17699a66194844bd4540b30e9daf8
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Tue Oct 20 18:13:06 2026 +0200
+Date:   Thu Oct 29 20:18:22 2026 +0100
 
-    Add translation example (#289)
+    Add Ming Omni TTS model (#343)
+    
+    * Share Ming routed expert projections across speech backbones
+    
+    * Add native Ming Omni speech and audio generation
+    
+    * List Ming Omni and show its default acoustic reference path
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
 
-commit 219eeb287687a87691d9d092172dd51d0a10e6d8
+commit 20fef0010f585349eabd30562d7ee36a0bc7447f
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Tue Oct 20 17:32:56 2026 +0200
+Date:   Thu Oct 29 20:00:23 2026 +0100
 
-    Add Gradium Phonon TTS model (#288)
+    Add TADA TTS model (#344)
     
-    * Remove MLXLLM dependency.
+    * Add native reference-conditioned TADA speech synthesis
     
-    * Remove MLXLMCommon dependency.
+    * List TADA synthesis and clarify its reference requirement
     
-    * Cleanup.
-    
-    * Add Gradium Phonon TTS model.
+    * Preserve TADA authentication and correct its code license link
 
-commit 92ca66cf36dbd9c4c2206308cd181191619010e4
+commit e8dd23f6930bff365aed82e0c3a3bfceafd4702e
 Author: Lucas Newman <lucasnewman@me.com>
-Date:   Mon Oct 19 19:11:14 2026 +0200
+Date:   Thu Oct 29 19:40:04 2026 +0100
 
-    Remove dependencies on MLXLMCommon / MLXLLM (#287)
+    Add Confucius4-TTS model (#341)
     
-    * Remove MLXLLM dependency.
+    * Read published NumPy sidecars natively
     
-    * Remove MLXLMCommon dependency.
+    * Share native ZIP member loading with NumPy sidecars
     
-    * Cleanup.
+    * Expose CAMPPlus for native speech conditioning
+    
+    * Support the published CAM++ speaker encoder layout
+    
+    * Add native Confucius4 voice cloning and speech synthesis
+    
+    * List Confucius4 speech generation in the model overview
+
+commit dc28d791b2b9353263b4b05133a511a4b85a5c52
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 29 19:39:51 2026 +0100
+
+    Add Voxtral TTS (#342)
+    
+    * Share Tekken tokenization across speech models
+    
+    * Add Voxtral multilingual speech synthesis
+    
+    * List Voxtral speech synthesis in the model overview
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+
+commit 548acc8fecec8646b4d9015892f043a10b2397b8
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 29 19:19:05 2026 +0100
+
+    Add MeloTTS model (#340)
+    
+    * Read published NumPy sidecars natively
+    
+    * Share native ZIP member loading with NumPy sidecars
+    
+    * Add native MeloTTS English speech synthesis
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+
+commit 11031988e141531ef54f323b6358c6a656bb3e6c
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 29 18:54:53 2026 +0100
+
+    Add Audio8 hybrid TTS model (#339)
+    
+    * Add a native Mamba-2 recurrent state scan
+    
+    * Support the Audio8 Falcon-H1 hybrid checkpoint
+    
+    * Polish the Audio8 model overview
+    
+    * List both Audio8 checkpoints in the model overview
+    
+    * Declare the Core Mamba kernel dependency explicitly
+
+commit 289684634ddc314c143b8fee424b6958f0483630
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 29 18:54:40 2026 +0100
+
+    Add ZONOS2 TTS model (#338)
+    
+    * Add native ZONOS2 speech generation
+    
+    * List ZONOS2 speech generation in the model overview
+
+commit d0a133c4799d0b76662656e954ba81e2eeff1ef6
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Thu Oct 29 18:36:46 2026 +0100
+
+    Add LongCat TTS model (#337)
+    
+    * Preserve exact Unicode pieces in SentencePiece tokenization
+    
+    * Add native LongCat AudioDiT speech synthesis
+    
+    * Retain blended LongCat audio across overlapping windows
+    
+    * List LongCat speech generation in the model overview
+    
+    * Remove the trailing blank line from LongCat configuration
+
+commit 34ba52c919372905059749f7b030e4c17734efed
+Author: ahuzmeza <32289581+ahuzmeza@users.noreply.github.com>
+Date:   Thu Oct 29 18:49:34 2026 +0200
+
+    IndexTTS: give the mel sequence the reference's positions (#316)
+    
+    The start mel token was appended to the text tokens, so it took a text embedding at a text position, and each generated mel token took mel position prompt_length + k. In the reference (index-tts GPT2InferenceModel) the start mel token is a mel embedding at mel position 0. With the prompt's ~35-60 positions added, the GPT began part-way into the utterance and dropped its opening words.
+    
+    Generated tokens now take mel position k + 2, as in the reference's kv-cache path (its default with fp16 on CUDA). Its CPU/MPS path and its training forward use k + 1; that measures the same here (12/450).
+    
+    mlx-community/IndexTTS, Tests/media/conversational_a.wav as reference, 10 sentences x 3 runs, Release CLI on a Mac mini M2 Pro, Whisper large-v3-turbo word error rate: 171/450 = 0.380 before (words near the start lost or garbled in every run, e.g. "The bus took the long way around the harbor." for "The bridge was closed for repairs, so the bus took the long way around the harbour.") -> 12/450 = 0.027 after (only "woodsmoke" and numerals). With --temperature 0, one of the sentences comes out as 26 s of near-silence before, the full sentence after.
+    
+    Tests: the prompt ends with the start mel token's mel embedding at position 0, and the second decode step uses mel position 2; both fail on main.
+
+commit fe2c182f4da8115fe2b6b99c9a4d2048fbf9b1e6
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Tue Oct 27 00:29:49 2026 +0100
+
+    Add VibeVoice TTS model (#332)
+    
+    * Add shared VibeVoice synthesis components
+    
+    * Preserve quantized VibeVoice module loading
+    
+    * Normalize VibeVoice quantization module paths
+    
+    * Match grouped convolution accumulation for VibeVoice BF16 audio
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Add full VibeVoice speech synthesis with reference conditioning
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+
+commit 8b410674262b2ee8106c32ac17943b99e262b826
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 23:04:37 2026 +0100
+
+    Add Ming-3.0 TTS Tiny model (#331)
+    
+    * Add shared VibeVoice synthesis components
+    
+    * Preserve quantized VibeVoice module loading
+    
+    * Normalize VibeVoice quantization module paths
+    
+    * Add shared Ming speech transformer and audio components
+    
+    * Add shared Ming speech transformer and audio components
+    
+    * Add KugelAudio speech synthesis
+    
+    * Match Ming rotary frequencies and verify deterministic cache execution
+    
+    * Match Ming rotary frequencies and verify deterministic cache execution
+    
+    * Add dense Ming speech synthesis and reference conditioning
+    
+    * Add Ming Tiny speech generation with routed experts
+    
+    * Match grouped convolution accumulation for VibeVoice BF16 audio
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Exclude Ming Tiny documentation from package resources
+    
+    * Link the new speech model from the supported models table
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Alphabetize TTS model type resolution
+
+commit 5935fafc0de4ad08fa74b09bbcd143a45d28fcb4
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 22:46:10 2026 +0100
+
+    Add Ming TTS model (#330)
+    
+    * Add shared VibeVoice synthesis components
+    
+    * Preserve quantized VibeVoice module loading
+    
+    * Normalize VibeVoice quantization module paths
+    
+    * Add shared Ming speech transformer and audio components
+    
+    * Add KugelAudio speech synthesis
+    
+    * Match Ming rotary frequencies and verify deterministic cache execution
+    
+    * Add dense Ming speech synthesis and reference conditioning
+    
+    * Match grouped convolution accumulation for VibeVoice BF16 audio
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Link the new speech model from the supported models table
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Alphabetize TTS model type resolution
+
+commit 7fdb657cb06eb47eba76918c8a848b26afee5a54
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 22:27:45 2026 +0100
+
+    Add KugelAudio model (#329)
+    
+    * Add shared VibeVoice synthesis components
+    
+    * Preserve quantized VibeVoice module loading
+    
+    * Normalize VibeVoice quantization module paths
+    
+    * Add KugelAudio speech synthesis
+    
+    * Match grouped convolution accumulation for VibeVoice BF16 audio
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Alphabetize TTS model type resolution
+
+commit 7eb6348a84fca73806d9d641e136f5601ac696f2
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 22:07:33 2026 +0100
+
+    Add VibeVoice Realtime model (#328)
+    
+    * Add shared VibeVoice synthesis components
+    
+    * Preserve quantized VibeVoice module loading
+    
+    * Normalize VibeVoice quantization module paths
+    
+    * Add VibeVoice Realtime speech generation
+    
+    * Exclude VibeVoice documentation from source builds
+    
+    * Match grouped convolution accumulation for VibeVoice BF16 audio
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Honor the caller cache when loading a local TTS model
+
+commit 38545799387a03f07263ae20f746c49f720f6487
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 21:48:02 2026 +0100
+
+    Add Audio8 TTS model (#327)
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Add Audio8 attention text-to-speech generation and reference voice cloning
+    
+    * Honor the caller cache when loading a local TTS model
+
+commit 66c3d2421c5e902621068f6f59b27bd01f4883b5
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 21:30:45 2026 +0100
+
+    Add Bark TTS model (#326)
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Use native MLX transposed convolution in Encodec
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Add Bark Small speech generation and speaker histories
+    
+    * Close the Bark loader call after merging Higgs v3
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+
+commit 9762c57c89bebd7c0baf5fa13c41b8dc0e1e6543
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 21:13:52 2026 +0100
+
+    Summarize models in README. (#325)
+
+commit 09bea8a8f8d1d0647609036006fcdb09bfe9bdeb
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 21:07:04 2026 +0100
+
+    Add Higgs Audio v3 TTS model (#324)
+    
+    * Share the Higgs semantic reference encoder with audio codecs
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Add Higgs Audio v3 speech generation
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+
+commit a259232274bf01688edf4d64d850a1d431325318
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 20:51:23 2026 +0100
+
+    Add rumik-oss TTS model (#321)
+    
+    * Add Rumik speech synthesis and incremental Mimi streaming
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Make Rumik numerical references independent of GPU rounding
+
+commit f3b4829deea19865887bdb410a7285751b93a710
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 20:14:28 2026 +0100
+
+    Add Higgs Audio v2 TTS model (#322)
+    
+    * Share the Higgs semantic reference encoder with audio codecs
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Add Higgs Audio v2 speech synthesis and streaming
+    
+    * Link the new speech model from the supported models table
+    
+    * Honor the caller cache when loading a local TTS model
+
+commit 9dd87cf3dda5d9612bfc9b61b0460c2bcdcc104c
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 20:13:07 2026 +0100
+
+    Cache packages to speed up CI (#323)
+
+commit a7bd75b989df22d2c527b58b8b217c2eb38cbc21
+Author: ahuzmeza <32289581+ahuzmeza@users.noreply.github.com>
+Date:   Mon Oct 26 21:05:03 2026 +0200
+
+    Qwen3-TTS: keep the ICL prompt in the talker's dtype (#315)
+    
+    The speaker encoder returns a float32 embedding. Concatenating it into
+    the bfloat16 codec prefix promotes the prefill, the KV cache and every
+    decode step to float32. Cast it to the prefix dtype at the concat, as
+    mlx-audio does since Blaizzy/mlx-audio#879.
+    
+    1.7B Base 8-bit, ICL with Tests/media/conversational_a.wav and its
+    transcript, Release CLI on an M2 Pro: 11.7 -> 25.3 tokens/s.
+
+commit 7b431f329857cfcf22c56e1936dcae5b2399b6e6
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 19:51:45 2026 +0100
+
+    Add OuteTTS model (#320)
+    
+    * Add OuteTTS speech synthesis and speaker profiles
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    ---------
+    
+    Signed-off-by: Lucas Newman <lucasnewman@me.com>
+
+commit d60236dee82de1173fc20757dad82a5116db1ddf
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 19:25:37 2026 +0100
+
+    Add direct loading for Phonon-2.5 models (#314)
+
+commit 8fdde52cfa7dcd109121db391d355d556bb932b2
+Author: Lucas Newman <lucasnewman@me.com>
+Date:   Mon Oct 26 19:23:46 2026 +0100
+
+    Add VoxCPM TTS model (#319)
+    
+    * Add VoxCPM 1 and 1.5 speech generation
+    
+    * Read every audio frame when AVFoundation returns a partial buffer
+    
+    * Honor the caller cache when loading a local TTS model
+    
+    * Make VoxCPM reference tests independent of GPU rounding
