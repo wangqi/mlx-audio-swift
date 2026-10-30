@@ -315,7 +315,9 @@ public enum TTS {
                 pretrained: { try await OuteTTSModel.fromPretrained($0, cache: $1) },
                 local: { modelDir, _ in try await OuteTTSModel.fromModelDirectory(modelDir, cache: source.cache) }
             )
-        case "pocket_tts", "phonon":
+        // gradium/phonon-31m-en's config.json switched to model_type "gradium_phonon_tts" on 2026-10-21; it is
+        // still the PocketTTS architecture (flow_lm + mimi), so load it through the same case // wangqi modified 2026-10-30
+        case "pocket_tts", "phonon", "gradium_phonon_tts":
             return try await load(
                 source,
                 modelType: resolvedType,
