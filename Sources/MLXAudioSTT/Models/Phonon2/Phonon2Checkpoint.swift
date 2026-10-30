@@ -26,6 +26,22 @@ enum Phonon2Checkpoint {
             model_type == "parakeet_tdt_five_value"
                 || fermion?.container_format == Phonon2Container.format
         }
+
+        /// mlx-community/Phonon-2 is a plain safetensors checkpoint whose config.json still carries the
+        /// `fermion` block it was converted from, naming a `model.fermion` the repo does not ship. Treat a
+        /// fermion-only config as a container only when that container file is actually in `directory`;
+        /// otherwise a downloaded Phonon-2 is judged incomplete, its cache is cleared and it is fetched
+        /// again. // wangqi modified 2026-10-30
+        func isContainer(in directory: URL) -> Bool {
+            guard isContainer else { return false }
+            if artifact != nil || model_type == "parakeet_tdt_five_value" { return true }
+            let container = fermion?.container ?? "model.fermion"
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent(container).path) {
+                return true
+            }
+            return !FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("model.safetensors").path)
+        }
     }
 
     private static let preparationLock = NSLock()
@@ -41,7 +57,8 @@ enum Phonon2Checkpoint {
         defer { preparationLock.unlock() }
         let data = try Data(contentsOf: directory.appendingPathComponent("config.json"))
         let metadata = try JSONDecoder().decode(Metadata.self, from: data)
-        guard metadata.isContainer else { return directory }
+        // A fermion-only config with plain weights is not a container // wangqi modified 2026-10-30
+        guard metadata.isContainer(in: directory) else { return directory }
         let source: URL
         let digest: String
         if let artifact = metadata.artifact {

@@ -68,10 +68,14 @@ public final class Phonon2Model: Module, STTGenerationModel {
             repoID: repoID, hfToken: ProcessInfo.processInfo.environment["HF_TOKEN"], cache: cache)
         let metadata = try JSONDecoder().decode(
             Phonon2Checkpoint.Metadata.self, from: Data(contentsOf: configURL))
+        // Judge a fermion-only config against the cached folder, so a downloaded plain Phonon-2
+        // (model.safetensors, no model.fermion) is not cleared and re-fetched // wangqi modified 2026-10-30
+        let cachedDirectory = cache.cacheDirectory.appendingPathComponent(
+            "mlx-audio/\(repoID.description.replacingOccurrences(of: "/", with: "_"))")
         let directory = try await ModelUtils.resolveOrDownloadModel(
             repoID: repoID,
             requiredExtension: metadata.artifact != nil
-                ? "zst" : (metadata.isContainer ? "fermion" : "safetensors"),
+                ? "zst" : (metadata.isContainer(in: cachedDirectory) ? "fermion" : "safetensors"),
             additionalMatchingPatterns: metadata.artifact.map { [$0.filename] } ?? [],
             hfToken: ProcessInfo.processInfo.environment["HF_TOKEN"], cache: cache
         )
