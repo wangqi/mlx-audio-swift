@@ -304,8 +304,6 @@ public class Qwen3ModelInner: Module {
 public class Qwen3Model: Module, KVCacheDimensionProvider, SpeechGenerationModel, @unchecked Sendable {
     public let vocabularySize: Int
     public let kvHeads: [Int]
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     public var tokenizer: Tokenizers.Tokenizer?
     public var _snacModel: SNAC?
 

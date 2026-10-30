@@ -24,8 +24,6 @@ public final class MarvisTTSModel: Module {
     
     private let model: CSMModel
     private let _promptURLs: [URL]?
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     private let _textTokenizer: Tokenizers.Tokenizer
     private let _audio_tokenizer: MimiTokenizer
     private let _streamingDecoder: MimiStreamingDecoder
@@ -56,8 +54,6 @@ public final class MarvisTTSModel: Module {
         promptURLs: [URL]? = nil,
         progressHandler: @Sendable @escaping (Progress) -> Void
     ) async throws {
-        // loadTokenizer(configuration:hub:) removed in mlx-swift-lm 2.30.3; use AutoTokenizer directly
-        // wangqi modified 2026-04-03
         let textTokenizer = try await AutoTokenizer.from(pretrained: repoId, hubApi: hub)
         let codec = try await Mimi.fromPretrained(progressHandler: progressHandler)
         let audioTokenizer = MimiTokenizer(codec)

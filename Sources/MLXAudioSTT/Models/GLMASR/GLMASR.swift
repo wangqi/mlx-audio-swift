@@ -278,8 +278,6 @@ public class GLMASRLanguageModel: Module, KVCacheDimensionProvider {
 
 /// Internal context for managing generation state.
 private struct GenerationContext {
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     let tokenizer: Tokenizers.Tokenizer
     let cache: [KVCache]
     let eosTokenIds: [Int]
@@ -461,7 +459,7 @@ public class GLMASRModel: Module {
         temperature: Float = 0.0,
         topP: Float = 0.95
     ) -> AsyncThrowingStream<STTGeneration, Error> {
-        AsyncThrowingStream { continuation in
+        makeSTTStream { [self] continuation in
             do {
                 guard let tokenizer = self.tokenizer else {
                     throw STTError.modelNotInitialized("Tokenizer not loaded")
@@ -481,6 +479,7 @@ public class GLMASRModel: Module {
                 
                 // Generate tokens
                 for _ in 0..<maxTokens {
+                    try Task.checkCancellation()
                     let nextToken = ctx.sampleNextToken(temperature: temperature)
                     
                     if ctx.isEOS(nextToken) {
@@ -530,7 +529,6 @@ public class GLMASRModel: Module {
                 )
                 continuation.yield(.result(output))
                 
-                continuation.finish()
             } catch {
                 continuation.finish(throwing: error)
             }

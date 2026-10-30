@@ -488,8 +488,6 @@ public final class T5TextEncoder {
     public let config: T5EncoderConfig
 
     private var model: T5Encoder?
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     private var tokenizer: Tokenizers.Tokenizer?
 
     public init(config: T5EncoderConfig) {

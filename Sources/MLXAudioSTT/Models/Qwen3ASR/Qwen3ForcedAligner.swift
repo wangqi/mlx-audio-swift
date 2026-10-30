@@ -339,8 +339,6 @@ public class Qwen3ForcedAlignerModel: Module {
     @ModuleInfo(key: "model") var model: Qwen3ASRTextModel
     @ModuleInfo(key: "lm_head") var lmHead: Linear
 
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     public var tokenizer: Tokenizers.Tokenizer?
     let alignerProcessor = ForceAlignProcessor()
 

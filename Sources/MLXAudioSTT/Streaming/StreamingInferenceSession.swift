@@ -1460,8 +1460,6 @@ private final class QwenStreamingInferenceSessionCore: @unchecked Sendable, Stre
         params: DecodePassParams,
         continuation: AsyncStream<TranscriptionEvent>.Continuation?,
         sharedState: OSAllocatedUnfairLock<SessionSharedState>,
-        // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-        // wangqi modified 2026-04-03
         tokenizer: any Tokenizers.Tokenizer,
         totalSamples: Int,
         decodeTime: Double,

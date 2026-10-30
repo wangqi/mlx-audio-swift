@@ -12,8 +12,6 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     let talker: Qwen3TTSTalkerForConditionalGeneration
     var speakerEncoder: Qwen3TTSSpeakerEncoder?
     var speechTokenizer: Qwen3TTSSpeechTokenizer?
-    // Tokenizers.Tokenizer disambiguates from MLXLMCommon.Tokenizer (mlx-swift-lm 2.30.3+)
-    // wangqi modified 2026-04-03
     var tokenizer: Tokenizers.Tokenizer?
 
     private struct ReferenceAudioContext {
@@ -821,7 +819,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             MLXArray([Int32(talkerConfig.codecPadId), Int32(talkerConfig.codecBosId)]).reshaped(1, 2)
         )
         if let speakerEmbedding = conditioning.speakerEmbedding {
-            let speakerEmbed = speakerEmbedding.reshaped(1, 1, -1)
+            // The speaker encoder returns float32; keep the prompt in the talker's dtype.
+            let speakerEmbed = speakerEmbedding.reshaped(1, 1, -1).asType(codecPrefixEmbed.dtype)
             codecPrefixEmbed = concatenated([codecPrefixEmbed, speakerEmbed, codecPrefixSuffix], axis: 1)
         } else {
             codecPrefixEmbed = concatenated([codecPrefixEmbed, codecPrefixSuffix], axis: 1)
