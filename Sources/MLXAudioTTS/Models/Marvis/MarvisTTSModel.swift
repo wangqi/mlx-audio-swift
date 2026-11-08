@@ -11,6 +11,11 @@ public final class MarvisTTSModel: Module {
     public enum Voice: String, Sendable {
         case conversationalA = "conversational_a"
         case conversationalB = "conversational_b"
+        // Expose the French and German prompts the v0.2 repo ships (prompts/conversational_fr.wav,
+        // conversational_de.wav; README "Voices"); the loader already collects every prompts/*.wav.
+        // wangqi modified 2026-11-07
+        case conversationalFr = "conversational_fr"
+        case conversationalDe = "conversational_de"
     }
     
     public enum QualityLevel: Int, Sendable {
