@@ -248,7 +248,24 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         if let last = ids.last, last == (tokenizer.eosTokenId ?? -1) {
             ids.removeLast()
         }
-        return ids
+        return ids.flatMap { Self.singleCharacterChineseIDs(for: $0, tokenizer: tokenizer) }
+    }
+
+    static func singleCharacterChineseIDs(for id: Int, tokenizer: Tokenizers.Tokenizer) -> [Int] {
+        guard let token = tokenizer.convertIdToToken(id) else { return [id] }
+        let word = token.replacingOccurrences(of: "▁", with: "")
+        let characters = word.unicodeScalars.map { String($0) }
+        guard characters.count >= 2,
+            word.unicodeScalars.allSatisfy({ (0x4E00 ... 0x9FFF).contains($0.value) }),
+            Self.vocabularyID(of: word, tokenizer: tokenizer) != nil
+        else { return [id] }
+        let ids = characters.compactMap { Self.vocabularyID(of: $0, tokenizer: tokenizer) }
+        return ids.count == characters.count ? ids : [id]
+    }
+
+    private static func vocabularyID(of token: String, tokenizer: Tokenizers.Tokenizer) -> Int? {
+        guard let id = tokenizer.convertTokenToId(token), id != tokenizer.unknownTokenId else { return nil }
+        return id
     }
 
     // MARK: - Generation
@@ -256,11 +273,11 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
     public func generate(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
+    ) async throws -> MaterializedArray {
         let maxTokens = generationParameters.maxTokens ?? config.maxLength
         let minTokens = 2
         let inferenceTimesteps = config.inferenceTimesteps
@@ -312,15 +329,17 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
         // Add batch dimension
         let bTextToken = textToken.expandedDimensions(axis: 0)
         let bAudioFeat = audioFeat.expandedDimensions(axis: 0)
-        let bTextMask = textMask.expandedDimensions(axis: 0)
-        let bAudioMask = audioMask.expandedDimensions(axis: 0)
-
-        // Encode audio features
-        var featEmbed = featEncoder(bAudioFeat)
-        featEmbed = encToLmProj(featEmbed)
 
         // Text embedding with scale
         let textEmbed = baseLM.embedTokens!(bTextToken) * scaleEmb
+
+        let dtype = textEmbed.dtype
+        let bTextMask = textMask.expandedDimensions(axis: 0).asType(dtype)
+        let bAudioMask = audioMask.expandedDimensions(axis: 0).asType(dtype)
+
+        // Encode audio features
+        var featEmbed = featEncoder(bAudioFeat.asType(dtype))
+        featEmbed = encToLmProj(featEmbed)
 
         // Combine text and audio embeddings
         let combinedEmbed = bTextMask[0..., 0..., .newAxis] * textEmbed
@@ -370,7 +389,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
             predFeatSeq.append(predFeat[0..., .newAxis, 0..., 0...]) // (B, 1, P, D)
 
-            let currEmbed = featEncoder(predFeat[0..., .newAxis, 0..., 0...])
+            let currEmbed = featEncoder(predFeat[0..., .newAxis, 0..., 0...].asType(dtype))
             let currEmbedProj = encToLmProj(currEmbed)
 
             // Stop prediction
@@ -411,18 +430,17 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
 
         let audio = audioVAE.decode(allFeatsFlat).flattened()
         eval(audio)
-        return audio
+        return (audio).materialized()
     }
 
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
-        let refAudio = SendingBox(refAudio)
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
 
         let task = Task { @Sendable [weak self] in
@@ -433,7 +451,7 @@ public final class VoxCPM2Model: Module, SpeechGenerationModel, @unchecked Senda
             do {
                 let startTime = Date()
                 let audio = try await self.generate(
-                    text: text, voice: voice, refAudio: refAudio.take(),
+                    text: text, voice: voice, refAudio: refAudio,
                     refText: refText, language: language,
                     generationParameters: generationParameters
                 )

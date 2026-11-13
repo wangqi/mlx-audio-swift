@@ -59,8 +59,8 @@ public class AudioUtils {
 }
 
 /// Load audio from a file and return the sample rate and audio data.
-/// The returned tensor is transferred to the caller and can cross an actor boundary.
-public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> sending (Int, MLXArray) {
+/// The returned tensor is an immutable snapshot that can be shared across actors.
+public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> (Int, MaterializedArray) {
     let audioFile = try AVAudioFile(forReading: url)
     let format = audioFile.processingFormat
     let frameCount = AVAudioFrameCount(audioFile.length)
@@ -70,6 +70,7 @@ public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> send
         throw AudioUtils.AudioUtilsErrors.cannotCreateAudioBuffer
     }
 
+    let channelCount = Int(format.channelCount)
     var samples: [Float] = []
     samples.reserveCapacity(Int(frameCount))
     while audioFile.framePosition < audioFile.length {
@@ -79,7 +80,15 @@ public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> send
         guard let floatChannelData = buffer.floatChannelData else {
             throw AudioUtils.AudioUtilsErrors.cannotReadFloatChannelData
         }
-        samples.append(contentsOf: UnsafeBufferPointer(start: floatChannelData[0], count: Int(buffer.frameLength)))
+        let start = samples.count
+        let frames = Int(buffer.frameLength)
+        samples.append(contentsOf: UnsafeBufferPointer(start: floatChannelData[0], count: frames))
+        if channelCount > 1 {
+            for channel in 1..<channelCount {
+                for frame in 0..<frames { samples[start + frame] += floatChannelData[channel][frame] }
+            }
+            for frame in 0..<frames { samples[start + frame] /= Float(channelCount) }
+        }
         if audioFile.framePosition <= previousPosition { break }
     }
 
@@ -91,7 +100,7 @@ public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> send
     }
 
     if targetSampleRate == sourceSampleRate {
-        return (sourceSampleRate, MLXArray(samples))
+        return (sourceSampleRate, MLXArray(samples).materialized())
     }
 
     let resampled = try resampleAudio(
@@ -99,7 +108,7 @@ public func loadAudioArray(from url: URL, sampleRate: Int? = nil) throws -> send
         from: sourceSampleRate,
         to: targetSampleRate
     )
-    return (targetSampleRate, MLXArray(resampled))
+    return (targetSampleRate, MLXArray(resampled).materialized())
 }
 
 /// Save audio data to a WAV file.

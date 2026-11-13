@@ -60,6 +60,28 @@ struct VoxtralTTSTests {
         #expect(throws: AudioGenerationError.self) { try processor.encode("Hi", voice: "unknown", sanitize: true) }
         #expect(throws: AudioGenerationError.self) { try processor.encode("\u{200b}", voice: "test", sanitize: true) }
     }
+
+    @Test func voiceEmbeddingCacheSharesSnapshotsAndInvalidatesReplacements() async throws {
+        let directory = try fixture()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let model = VoxtralTTSModel(config())
+        model.textProcessor = try VoxtralTTSTextProcessor(directory: directory)
+        let firstFile = directory.appendingPathComponent("first.safetensors")
+        let secondFile = directory.appendingPathComponent("second.safetensors")
+        try save(arrays: ["embedding": MLXArray.ones([3, 8])], url: firstFile)
+        try save(arrays: ["embedding": MLXArray.ones([3, 8]) * 2], url: secondFile)
+        model.registerVoice("test", file: firstFile)
+        async let first = Task.detached { try model.voiceEmbedding("test") }.value
+        async let second = Task.detached { try model.voiceEmbedding("test") }.value
+        let (a, b) = try await (first, second)
+        #expect(a === b)
+        #expect(a.asArray(Float.self) == Array(repeating: 1, count: 24))
+        model.registerVoice("test", file: secondFile)
+        let replacement = try model.voiceEmbedding("test")
+        #expect(replacement !== a)
+        #expect(replacement.asArray(Float.self) == Array(repeating: 2, count: 24))
+        #expect(a.asArray(Float.self) == Array(repeating: 1, count: 24))
+    }
     @Test func textCleanup() throws {
         #expect(try VoxtralTTSText.sanitize("# Hello **world**!!!\nRead [this](https://example.com).") == "Hello **world**! Read this.")
         #expect(try VoxtralTTSText.sanitize("Pay $1.25 and $2.05 (N/A, >= 5ms).") == "Pay one dollar and twenty-five cents and two oh five—not available, greater than or equal to 5 milliseconds—.")
@@ -122,6 +144,28 @@ struct VoxtralTTSTests {
         #expect(abs(waveform[0...,0..<prefix.dim(1)] - prefix).max().item(Float.self) < 1e-6)
         }
     }
+    @Test func streamedChunksMatchOfflineDecode() throws {
+        try Device.withDefaultDevice(.cpu) {
+        // The shipped decoder depth: the two-stage test config reaches back too few frames to need the streaming context.
+        var c = config(); c.decoderLengths = [2,2,2,2]; c.decoderKernels = [3,4,4,4]; c.decoderStrides = [1,2,2,2]
+        let model = VoxtralTTSModel(c)
+        MLXRandom.seed(1)
+        let weights = Dictionary(uniqueKeysWithValues: model.audioDecoder.parameters().flattened().map { key,value in
+            let tensor: MLXArray
+            if key.hasSuffix("norm.weight") || key.hasSuffix("cluster_usage") { tensor = .ones(value.shape) }
+            else if key.hasSuffix("scale") { tensor = .ones(value.shape) * 0.5 }
+            else { tensor = MLXRandom.normal(value.shape) / sqrt(Float(value.size / value.dim(0))) }
+            return (key,tensor)
+        })
+        try model.audioDecoder.update(parameters: ModuleParameters.unflattened(weights), verify: .all)
+        let codes = concatenated([MLXRandom.randInt(2..<6, [1,80,1]), MLXRandom.randInt(2..<7, [1,80,2])], axis: -1).asType(.int32)
+        let frames = (0..<80).map { codes[0...,$0..<($0 + 1),0...] }
+        let offline = model.audioDecoder.decode(codes).reshaped(-1)
+        let streamed = concatenated(stride(from: 0, to: 80, by: 25).map { model.decodeChunk(Array(frames[0..<min($0 + 25, 80)]), from: $0) }, axis: 0)
+        #expect(streamed.shape == offline.shape)
+        #expect(abs(streamed - offline).max().item(Float.self) < 1e-4)
+        }
+    }
     @Test func quantizedProjectionRestoresPublishedLayout() throws {
         try Device.withDefaultDevice(.cpu) {
             let source = VoxtralTTSAttention(dim: 64, heads: 2, kvHeads: 1, headDim: 32)
@@ -171,12 +215,32 @@ struct VoxtralTTSTests {
         #expect(chunks == 2)
         #expect(samples == audio.size)
     }
+    final class DtypeProbe: Linear {
+        var seen: [DType] = []
+        override func callAsFunction(_ x: MLXArray) -> MLXArray {
+            seen.append(x.dtype)
+            return super.callAsFunction(x)
+        }
+    }
+    @Test func bfloat16HeadStaysBfloat16ThroughDecodeFrame() throws {
+        let c = config()
+        let head = VoxtralTTSAcousticHead(c)
+        let probe = DtypeProbe(c.acousticDim, c.acousticCodebooks, bias: false)
+        try head.update(modules: ModuleChildren.unflattened(["acoustic_codebook_output": probe]), verify: .all)
+        let bf16 = head.parameters().flattened().map { ($0.0, $0.1.asType(.bfloat16)) }
+        try head.update(parameters: ModuleParameters.unflattened(bf16), verify: .all)
+
+        let codes = head.decodeFrame(MLXRandom.normal([1, c.dim]).asType(.bfloat16), options: .init(denoisingSteps: 3))
+
+        #expect(codes.shape == [1, 3])
+        #expect(probe.seen == [.bfloat16, .bfloat16])
+    }
     @Test func invalidGenerationFails() async throws {
         let model = VoxtralTTSModel(config())
         await #expect(throws: AudioGenerationError.self) { try await model.generate(text: "Hi", options: .init(denoisingSteps: 1)) }
         await #expect(throws: AudioGenerationError.self) { try await model.generate(text: "Hi", generationParameters: .init(maxTokens: 0)) }
         await #expect(throws: AudioGenerationError.self) {
-            try await model.generate(text: "Hi", voice: nil, refAudio: .zeros([8]), refText: nil, language: nil, generationParameters: .init())
+            try await model.generate(text: "Hi", voice: nil, refAudio: MLXArray.zeros([8]).materialized(), refText: nil, language: nil, generationParameters: .init())
         }
     }
 }

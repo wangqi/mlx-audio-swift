@@ -14,11 +14,22 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     var speechTokenizer: Qwen3TTSSpeechTokenizer?
     var tokenizer: Tokenizers.Tokenizer?
 
-    private struct ReferenceAudioContext {
-        let audioID: ObjectIdentifier
-        let speakerEmbedding: MLXArray?
-        let refCodes: MLXArray
-        let codecEmbedIcl: MLXArray
+    private struct ReferenceAudioContext: Sendable {
+        let audio: MaterializedArray
+        var audioID: ObjectIdentifier { ObjectIdentifier(audio) }
+        let speakerEmbedding: MaterializedArray?
+        let refCodes: MaterializedArray
+        let codecEmbedIcl: MaterializedArray
+
+        init(audio: MaterializedArray, speakerEmbedding: MLXArray?, refCodes: MLXArray, codecEmbedIcl: MLXArray) {
+            self.audio = audio
+            var tensors = [refCodes, codecEmbedIcl]
+            if let speakerEmbedding { tensors.append(speakerEmbedding) }
+            let snapshots = materialize(tensors)
+            self.refCodes = snapshots[0]
+            self.codecEmbedIcl = snapshots[1]
+            self.speakerEmbedding = speakerEmbedding == nil ? nil : snapshots[2]
+        }
     }
 
     private let inputPreparationCacheLock = NSLock()
@@ -52,18 +63,18 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     public func generate(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
+    ) async throws -> MaterializedArray {
         try requireGenerationComponents()
         let settings = resolveVoiceDesignGenerationSettings(
             language: language,
             generationParameters: generationParameters
         )
 
-        return try generateVoiceDesign(
+        return (try generateVoiceDesign(
             text: text,
             instruct: voice,
             language: settings.language,
@@ -75,17 +86,17 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             repetitionPenalty: settings.repetitionPenalty,
             minP: settings.minP,
             maxTokens: settings.maxTokens
-        )
+        )).materialized()
     }
 
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         generateStream(
             text: text,
             voice: voice,
@@ -100,19 +111,17 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters,
         streamingInterval: Double
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let settings = resolveVoiceDesignGenerationSettings(
             language: language,
             generationParameters: generationParameters
         )
-        let refAudio = SendingBox(refAudio)
         return makeGenerationStream { model, onToken, onInfo, onAudioChunk in
-            let refAudio = refAudio.take()
             _ = try model.generateVoiceDesign(
                 text: text,
                 instruct: voice,
@@ -137,14 +146,14 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         text: String,
         conditioning: Qwen3TTSReferenceConditioning,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
+    ) async throws -> MaterializedArray {
         try requireGenerationComponents()
         let settings = resolveVoiceDesignGenerationSettings(
             language: conditioning.resolvedLanguage,
             generationParameters: generationParameters
         )
 
-        return try generateVoiceDesign(
+        return (try generateVoiceDesign(
             text: text,
             instruct: nil,
             language: settings.language,
@@ -157,14 +166,14 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             repetitionPenalty: settings.repetitionPenalty,
             minP: settings.minP,
             maxTokens: settings.maxTokens
-        )
+        )).materialized()
     }
 
     public func generateStream(
         text: String,
         conditioning: Qwen3TTSReferenceConditioning,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         generateStream(
             text: text,
             conditioning: conditioning,
@@ -178,7 +187,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         conditioning: Qwen3TTSReferenceConditioning,
         generationParameters: GenerateParameters,
         streamingInterval: Double
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let settings = resolveVoiceDesignGenerationSettings(
             language: conditioning.resolvedLanguage,
             generationParameters: generationParameters
@@ -212,7 +221,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     ///   - codes: Codec codes [1, time, numCodeGroups]
     ///   - chunkTokens: Tokens per decode chunk (controls decode granularity)
     /// - Returns: Decoded audio waveform (1D)
-    private func decodeChunk(_ codes: MLXArray, chunkTokens: Int = 300) -> MLXArray {
+    func decodeChunk(_ codes: MLXArray, chunkTokens: Int = 300) -> MLXArray {
         guard let speechTokenizer else { return MLXArray.zeros([1]) }
 
         var audioChunks = [MLXArray]()
@@ -221,7 +230,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         }
         var audio = concatenated(audioChunks, axis: -1)[0]
 
-        let validLen = Int((codes[0..., 0..., 0] .> 0).sum().item(Int32.self))
+        let validLen = Int((codes[0..., 0..., 0] .>= 0).sum().item(Int32.self))
             * speechTokenizer.decodeUpsampleRate
         if validLen > 0, validLen < audio.dim(0) {
             audio = audio[..<validLen]
@@ -265,7 +274,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         return concatenated([codecBosEmbed, refCodecEmbed], axis: 1)
     }
 
-    private func referenceAudioContext(for refAudio: MLXArray) -> ReferenceAudioContext {
+    private func referenceAudioContext(for refAudio: MaterializedArray) -> ReferenceAudioContext {
         guard let speechTokenizer, let talkerConfig = config.talkerConfig else {
             fatalError("Speech tokenizer/config not loaded")
         }
@@ -281,13 +290,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         let speakerEmbedding = extractSpeakerEmbedding(refAudio)
         let refCodes = speechTokenizer.encode(referenceAudioForEncoder(refAudio))
         let codecEmbedIcl = codecEmbedIcl(from: refCodes, talkerConfig: talkerConfig)
-        if let speakerEmbedding {
-            eval(speakerEmbedding, refCodes, codecEmbedIcl)
-        } else {
-            eval(refCodes, codecEmbedIcl)
-        }
         let context = ReferenceAudioContext(
-            audioID: audioID,
+            audio: refAudio,
             speakerEmbedding: speakerEmbedding,
             refCodes: refCodes,
             codecEmbedIcl: codecEmbedIcl
@@ -309,7 +313,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         instruct: String?,
         language: String,
         conditioning: Qwen3TTSReferenceConditioning? = nil,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         temperature: Float,
         topK: Int,
@@ -320,7 +324,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         streamingInterval: Double = 2.0,
         onToken: ((Int) -> Void)? = nil,
         onInfo: ((AudioGenerationInfo) -> Void)? = nil,
-        onAudioChunk: ((sending MLXArray) -> Void)? = nil
+        onAudioChunk: ((MaterializedArray) -> Void)? = nil
     ) throws -> MLXArray {
         guard let speechTokenizer, let tokenizer else {
             throw AudioGenerationError.modelNotInitialized(
@@ -368,7 +372,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 text: text,
                 language: language,
                 instruct: effectiveInstruct,
-                speaker: speaker
+                speaker: speaker,
+                refAudio: refAudio
             )
             inputEmbedsInit = prepared.0
             trailingTextHidden = prepared.1
@@ -403,6 +408,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
         if onAudioChunk != nil {
             speechTokenizer.decoder.resetStreamingState()
+            if let refCodes {
+                speechTokenizer.decoder.primeStreamingState(referenceCodes: refCodes)
+            }
         }
         defer {
             if onAudioChunk != nil {
@@ -498,10 +506,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                     eval(codesForDecoder)
                     let decoded = speechTokenizer.decoder.streamingStep(codesForDecoder).squeezed(axis: 1)
                     let audioChunk = decoded[0]
-                    eval(audioChunk)
-
                     decodedTokens = generatedCodes.count
-                    onAudioChunk(audioChunk)
+                    onAudioChunk(audioChunk.materialized())
                 }
             }
 
@@ -538,8 +544,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
                 eval(codesForDecoder)
                 let decoded = speechTokenizer.decoder.streamingStep(codesForDecoder).squeezed(axis: 1)
                 let audioChunk = decoded[0]
-                eval(audioChunk)
-                onAudioChunk(audioChunk)
+                onAudioChunk(audioChunk.materialized())
             }
             // Streaming chunks already yielded; return empty (caller uses chunks)
             return MLXArray.zeros([1])
@@ -596,7 +601,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     // MARK: - Reference conditioning
 
     public func prepareReferenceConditioning(
-        refAudio: MLXArray,
+        refAudio: MaterializedArray,
         refText: String,
         language: String?
     ) throws -> Qwen3TTSReferenceConditioning {
@@ -618,10 +623,10 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         let maxTokens: Int
     }
 
-    public struct Qwen3TTSReferenceConditioning: @unchecked Sendable {
-        public let speakerEmbedding: MLXArray?
-        public let referenceSpeechCodes: MLXArray
-        public let referenceTextTokenIDs: MLXArray
+    public struct Qwen3TTSReferenceConditioning: Sendable {
+        public let speakerEmbedding: MaterializedArray?
+        public let referenceSpeechCodes: MaterializedArray
+        public let referenceTextTokenIDs: MaterializedArray
         public let resolvedLanguage: String
         public let codecLanguageID: Int?
 
@@ -632,9 +637,12 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             resolvedLanguage: String,
             codecLanguageID: Int?
         ) {
-            self.speakerEmbedding = speakerEmbedding
-            self.referenceSpeechCodes = referenceSpeechCodes
-            self.referenceTextTokenIDs = referenceTextTokenIDs
+            var tensors = [referenceSpeechCodes, referenceTextTokenIDs]
+            if let speakerEmbedding { tensors.append(speakerEmbedding) }
+            let snapshots = materialize(tensors)
+            self.referenceSpeechCodes = snapshots[0]
+            self.referenceTextTokenIDs = snapshots[1]
+            self.speakerEmbedding = speakerEmbedding == nil ? nil : snapshots[2]
             self.resolvedLanguage = resolvedLanguage
             self.codecLanguageID = codecLanguageID
         }
@@ -669,9 +677,9 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             Qwen3TTSModel,
             @escaping (Int) -> Void,
             @escaping (AudioGenerationInfo) -> Void,
-            @escaping (sending MLXArray) -> Void
+            @escaping (MaterializedArray) -> Void
         ) throws -> Void
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
         let task = Task { @Sendable [weak self] in
             guard let self else { return }
@@ -694,7 +702,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
     func prepareICLGenerationInputs(
         text: String,
-        refAudio: MLXArray,
+        refAudio: MaterializedArray,
         refText: String,
         language: String
     ) throws -> (MLXArray, MLXArray, MLXArray, MLXArray) {
@@ -708,7 +716,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
     }
 
     func prepareReferenceConditioning(
-        refAudio: MLXArray,
+        refAudio: MaterializedArray,
         refText: String,
         speakerEmbedding: MLXArray?,
         language: String
@@ -867,13 +875,7 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
 
         for batch in 0 ..< batchSize {
             let waveform = rawAudio[batch]
-            let mel = computeMelSpectrogram(
-                audio: waveform,
-                sampleRate: speakerEncoder.config.sampleRate,
-                nFft: 1024,
-                hopLength: 256,
-                nMels: 128
-            )
+            let mel = speakerEncoderMelSpectrogram(waveform, sampleRate: speakerEncoder.config.sampleRate)
             mels.append(mel)
         }
 
@@ -888,7 +890,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
         text: String,
         language: String,
         instruct: String?,
-        speaker: String? = nil
+        speaker: String? = nil,
+        refAudio: MLXArray? = nil
     ) -> (MLXArray, MLXArray, MLXArray) {
         guard let tokenizer, let talkerConfig = config.talkerConfig else {
             fatalError("Tokenizer/config not loaded")
@@ -916,9 +919,11 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             languageId = langMap[language.lowercased()]
         }
 
-        // Speaker embedding (CustomVoice models only)
+        // Speaker embedding: x-vector from reference audio (Base models), else CustomVoice speaker id
         var speakerEmbed: MLXArray? = nil
-        if let speaker = speaker {
+        if let refAudio, let embedding = extractSpeakerEmbedding(refAudio) {
+            speakerEmbed = embedding
+        } else if let speaker = speaker {
             if let spkIdMap = talkerConfig.spkId,
                let spkIdValue = spkIdMap[speaker.lowercased()] {
                 let spkIdArray = MLXArray([Int32(spkIdValue.intValue)]).reshaped(1, 1)
@@ -959,7 +964,8 @@ public final class Qwen3TTSModel: Module, SpeechGenerationModel, @unchecked Send
             MLXArray([Int32(talkerConfig.codecPadId), Int32(talkerConfig.codecBosId)]).reshaped(1, 2)
         )
         if let spkEmbed = speakerEmbed {
-            codecEmbed = concatenated([codecEmbed, spkEmbed.reshaped([1, 1, -1]), codecEmbedSuffix], axis: 1)
+            codecEmbed = concatenated(
+                [codecEmbed, spkEmbed.reshaped([1, 1, -1]).asType(codecEmbed.dtype), codecEmbedSuffix], axis: 1)
             print("[Qwen3TTS] CustomVoice: codec prefix length = \(codecEmbed.dim(1))")
         } else {
             codecEmbed = concatenated([codecEmbed, codecEmbedSuffix], axis: 1)

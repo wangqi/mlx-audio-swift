@@ -349,6 +349,34 @@ struct GLMASRModuleSetupTests {
         #expect(eoa.shape == [1, llamaConfig.hiddenSize])
     }
 
+    @Test func longAudioChunksFitTheEncoderWindow() {
+        let whisperConfig = GLMASRWhisperConfig(dModel: 64, encoderAttentionHeads: 2, encoderFfnDim: 128, encoderLayers: 1)
+        let llamaConfig = LlamaConfig(vocabSize: 32, hiddenSize: 64, intermediateSize: 128, numHiddenLayers: 1,
+                                      numAttentionHeads: 2, numKeyValueHeads: 1)
+        let model = GLMASRModel(config: GLMASRModelConfig(whisperConfig: whisperConfig, lmConfig: llamaConfig))
+        #expect(model.maxChunkDuration == 30)
+
+        let sampleRate = 16000
+        var samples = (0..<(70 * sampleRate)).map { Float(0.5 * sin(Double($0) * 2 * .pi * 220 / 16000)) }
+        for dip in [31, 62] {
+            for i in (dip * sampleRate)..<(dip * sampleRate + sampleRate / 5) { samples[i] = 0 }
+        }
+        let audio = MLXArray(samples)
+
+        let unbounded = splitAudioIntoChunks(audio, sampleRate: sampleRate, chunkDuration: 30)
+        #expect(Float(unbounded[0].0.dim(0)) / Float(sampleRate) > 30)
+
+        let chunks = model.audioChunks(audio, chunkDuration: 30) ?? []
+        #expect(chunks.count == 3)
+        #expect(chunks.allSatisfy { $0.end - $0.start <= model.maxChunkDuration })
+        #expect(chunks.first?.start == 0)
+        #expect(chunks.last?.end == 70)
+        #expect(chunks.map(\.audio).reduce(0) { $0 + $1.dim(0) } == 70 * sampleRate)
+
+        #expect(model.audioChunks(audio[..<(30 * sampleRate)], chunkDuration: 30) == nil)
+        #expect(model.audioChunks(MLXArray.zeros([3000, 128]), chunkDuration: 30) == nil)
+    }
+
     // MARK: - STTOutput Tests
 
     @Test func sttOutputDescription() {
@@ -942,6 +970,31 @@ struct CanarySTTTests {
         #expect(config.decoder.numLayers == 3)
         #expect(config.decoder.numAttentionHeads == 8)
         #expect(config.supportedLanguages == ["en", "de"])
+    }
+
+    @Test func languageNamesResolveToPromptCodes() {
+        let config = Self.tinyConfig()
+        #expect(config.languageCode(for: "en") == "en")
+        #expect(config.languageCode(for: "English") == "en")
+        #expect(config.languageCode(for: "german") == "de")
+        #expect(config.languageCode(for: "en-US") == "en")
+        #expect(config.languageCode(for: "de_AT") == "de")
+        #expect(config.languageCode(for: "French") == "French")
+        #expect(config.languageCode(for: "xx") == "xx")
+    }
+
+    @Test func longAudioIsDecodedInChunks() {
+        let model = CanaryModel(config: Self.tinyConfig())
+        let audio = MLXRandom.normal([640_000]) * 0.1
+        func promptTokens(chunkDuration: Float) -> Int {
+            model.generate(
+                audio: audio,
+                generationParameters: STTGenerateParameters(
+                    maxTokens: 1, temperature: 0, chunkDuration: chunkDuration, minChunkDuration: 0.1)
+            ).promptTokens
+        }
+        let single = promptTokens(chunkDuration: 1200)
+        #expect(promptTokens(chunkDuration: 10) >= 3 * single)
     }
 
     @Test func tokenizerBuildsPromptFromTokensFile() throws {
@@ -1939,6 +1992,22 @@ struct MossTranscribeDiarizeModuleSetupTests {
 }
 
 struct CohereTranscribeModuleSetupTests {
+
+    @Test func encoderRunsInTheWeightsDtypeWithFloat32Features() throws {
+        let json = """
+        {"d_model": 16, "ff_expansion_factor": 2, "n_heads": 2, "conv_kernel_size": 3, "n_layers": 1,
+         "pos_emb_max_len": 64, "subsampling_conv_channels": 4, "subsampling_factor": 8, "feat_in": 16}
+        """
+        let config = try JSONDecoder().decode(CohereTranscribeAudioEncoderConfig.self, from: Data(json.utf8))
+        let encoder = ConformerEncoder(config)
+        encoder.train(false)
+        let fp16 = encoder.parameters().flattened().map { ($0.0, $0.1.asType(.float16)) }
+        encoder.update(parameters: ModuleParameters.unflattened(fp16))
+
+        let features = MLXRandom.normal([1, config.featIn, 40])
+        let (out, _) = encoder(features)
+        #expect(out.dtype == .float16)
+    }
 
     @Test func cohereConfigDecoding() throws {
         let json = """
@@ -4167,6 +4236,26 @@ struct FireRedASR2Tests {
         #expect(cache[0]?.shape == [1, 2, 16])
     }
 
+    @Test func longAudioIsDecodedInChunks() {
+        let config = FireRedASR2Config(
+            odim: 16,
+            dModel: 16,
+            eosID: 99,
+            encoder: FireRedASR2EncoderConfig(nLayers: 1, nHead: 4, dModel: 16, kernelSize: 15),
+            decoder: FireRedASR2DecoderConfig(nLayers: 1, nHead: 4, dModel: 16)
+        )
+        let model = FireRedASR2Model(config)
+        let audio = MLXRandom.normal([640_000]) * 0.1
+        func passes(chunkDuration: Float) -> Int {
+            model.generate(
+                audio: audio,
+                generationParameters: STTGenerateParameters(maxTokens: 1, chunkDuration: chunkDuration)
+            ).generationTokens
+        }
+        #expect(passes(chunkDuration: 1200) == 1)
+        #expect(passes(chunkDuration: 10) >= 3)
+    }
+
     @Test func sanitizeRemapsAndTransposesWeights() {
         let weights: [String: MLXArray] = [
             "encoder.input_preprocessor.conv.0.weight": MLXArray.zeros([8, 1, 3, 3], type: Float.self),
@@ -4633,6 +4722,63 @@ struct GraniteSpeechModuleTests {
 
 @Suite("Whisper Tests", .serialized)
 struct WhisperTests {
+
+    @Test func transcriptDeltasWaitForACharacterSplitAcrossTokens() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let data =
+            #"{"model":{"type":"BPE","vocab":{"<unk>":0,"C":1,"a":2,"f":3,"Ã":4,"©":5},"merges":[],"unk_token":"<unk>"},"decoder":{"type":"ByteLevel"}}"#
+        try Data(data.utf8).write(to: directory.appendingPathComponent("tokenizer.json"))
+        try Data(#"{"tokenizer_class":"GPT2Tokenizer","unk_token":"<unk>"}"#.utf8).write(
+            to: directory.appendingPathComponent("tokenizer_config.json"))
+        let tokenizer = try await loadSTTTokenizer(from: directory)
+        let tokens = [1, 2, 3, 4, 5, 1]
+        #expect(tokenizer.decode(tokens: Array(tokens.prefix(4))) == "Caf\u{FFFD}")
+
+        var sent = ""
+        var stream = ""
+        for count in 1 ... tokens.count {
+            let text = tokenizer.decode(tokens: Array(tokens.prefix(count)))
+            if let delta = transcriptDelta(from: sent, to: text) {
+                stream += delta
+                sent = text
+            }
+        }
+        #expect(stream == "CaféC")
+
+        sent = ""
+        stream = ""
+        for text in ["नम", "नमस", "नमस्", "नमस्त", "नमस्ते"] {
+            if let delta = transcriptDelta(from: sent, to: text) {
+                stream += delta
+                sent = text
+            }
+        }
+        #expect(stream == "नमस्ते")
+
+        let pieces = ["E4", "B8", "AD", "E6", "96", "87"].map { "[\"<0x\($0)>\",0]" }
+        let json =
+            #"{"model":{"type":"Unigram","unk_id":0,"vocab":[["<unk>",0],"#
+            + pieces.joined(separator: ",") + "]}}"
+        let sentencePiece = try SentencePieceTokenizer(tokenizerJSONData: Data(json.utf8))
+        #expect(sentencePiece.decode([1, 2, 3, 4]) == "")
+        sent = ""
+        stream = ""
+        for count in 1 ... pieces.count {
+            let text = sentencePiece.decode(Array(1 ... count))
+            if let delta = transcriptDelta(from: sent, to: text) {
+                stream += delta
+                sent = text
+            }
+        }
+        #expect(stream == "中文")
+
+        #expect(transcriptDelta(from: "Caf", to: "Caf\u{FFFD}") == nil)
+        #expect(transcriptDelta(from: "Caf", to: "Caf\u{FFFD}", complete: true) == "\u{FFFD}")
+        #expect(transcriptDelta(from: "Café", to: "Café", complete: true) == nil)
+    }
 
     @Test func configDefaultsMatchOpenAIWhisperTiny() {
         let defaults = WhisperConfig()

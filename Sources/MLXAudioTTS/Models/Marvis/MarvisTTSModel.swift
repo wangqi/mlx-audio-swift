@@ -109,6 +109,9 @@ public final class MarvisTTSModel: Module {
         var codes: MLXArray
         let x = audio.reshaped([1, 1, audio.shape[0]])
         let encoded = encodeChunked(x) // [1, K, Tq]
+        guard encoded.shape[2] > 0 else {
+            throw MarvisTTSModelError.invalidRefAudio("Reference audio is shorter than one Mimi frame.")
+        }
         codes = split(encoded, indices: [1], axis: 0)[0].reshaped([K, encoded.shape[2]])
         
         let frameW = K + 1
@@ -347,7 +350,7 @@ public extension MarvisTTSModel {
         text: [String],
         voice: Voice? = .conversationalA,
         qualityLevel: QualityLevel = .maximum,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         splitPattern: String? = #"(\n+)"#,
         streamingInterval: Double = 0.5
@@ -370,7 +373,7 @@ public extension MarvisTTSModel {
         text: String,
         voice: Voice? = .conversationalA,
         qualityLevel: QualityLevel = .maximum,
-        refAudio: sending MLXArray? = nil,
+        refAudio: MaterializedArray? = nil,
         refText: String? = nil,
         splitPattern: String? = #"(\n+)"#,
         streamingInterval: Double = 0.5
@@ -389,15 +392,13 @@ public extension MarvisTTSModel {
         text: [String],
         voice: Voice? = .conversationalA,
         qualityLevel: QualityLevel = .maximum,
-        refAudio: sending MLXArray? = nil,
+        refAudio: MaterializedArray? = nil,
         refText: String? = nil,
         streamingInterval: Double = 0.5
     ) -> AsyncThrowingStream<GenerationResult, Error> {
         let (stream, continuation) = AsyncThrowingStream<GenerationResult, Error>.makeStream()
 
-        let refAudio = SendingBox(refAudio)
         let task = Task { @Sendable [weak self, continuation] in
-            let refAudio = refAudio.take()
             guard let self else { return }
             do {
                 guard voice != nil || refAudio != nil else {
@@ -586,11 +587,11 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
     public func generate(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
+    ) async throws -> MaterializedArray {
         _ = generationParameters
         let resolvedVoice = try resolveVoice(from: voice)
 
@@ -603,17 +604,17 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
             streamingInterval: 0.5
         )
 
-        return MLXArray(audio)
+        return (MLXArray(audio)).materialized()
     }
 
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         generateStream(
             text: text,
             voice: voice,
@@ -628,22 +629,15 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters,
         streamingInterval: Double
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
 
-        // wangqi modified 2026-03-21
-        // Capture the inner Task so onTermination can cancel it when the stream consumer
-        // stops consuming (e.g. MLXAudioSpeaker breaks out of the for-try-await loop on
-        // task cancellation). Without this, the generation task keeps running and accessing
-        // the model after MLXAudioSpeaker has started a new generation, causing data races.
-        let refAudio = SendingBox(refAudio)
-        let generationTask = Task { @Sendable [weak self, continuation] in
-            let refAudio = refAudio.take()
+        let task = Task { @Sendable [weak self, continuation] in
             guard let self else { return }
 
             do {
@@ -666,8 +660,7 @@ extension MarvisTTSModel: SpeechGenerationModel, @unchecked Sendable {
                 continuation.finish(throwing: error)
             }
         }
-
-        continuation.onTermination = { @Sendable _ in generationTask.cancel() }
+        continuation.onTermination = { @Sendable _ in task.cancel() }
 
         return stream
     }

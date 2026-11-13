@@ -330,13 +330,7 @@ public final class WhisperModel: Module, STTGenerationModel {
                 }
             } else if let onTokenDelta {
                 let textSoFar = tokenizer.decode(tokens: generated)
-                if textSoFar != previousText {
-                    let delta: String
-                    if textSoFar.hasPrefix(previousText) {
-                        delta = String(textSoFar.dropFirst(previousText.count))
-                    } else {
-                        delta = textSoFar
-                    }
+                if let delta = transcriptDelta(from: previousText, to: textSoFar) {
                     onTokenDelta(delta)
                     previousText = textSoFar
                 }
@@ -357,6 +351,11 @@ public final class WhisperModel: Module, STTGenerationModel {
             }
         }
 
+        if !withTimestamps, let onTokenDelta,
+            let delta = transcriptDelta(from: previousText, to: tokenizer.decode(tokens: generated), complete: true)
+        {
+            onTokenDelta(delta)
+        }
         // The language token sits at prompt index 1 for multilingual models.
         var language: String? = nil
         if tokenizer.isMultilingual, promptIds.count > 1 {
@@ -510,6 +509,7 @@ public final class WhisperModel: Module, STTGenerationModel {
         let encPosKey = "model.encoder.embed_positions.weight"
         if sanitized[encPosKey] == nil, let conv2 = sanitized["model.encoder.conv2.weight"] {
             sanitized[encPosKey] = whisperSinusoids(length: 1500, channels: conv2.shape[0])
+                .asType(conv2.dtype)
         }
 
         return sanitized

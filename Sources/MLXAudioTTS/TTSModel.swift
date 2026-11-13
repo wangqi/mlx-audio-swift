@@ -282,6 +282,10 @@ public enum TTS {
                 pretrained: { try await LongCatModel.fromPretrained($0, cache: $1) },
                 local: { directory, _ in try await LongCatModel.fromModelDirectory(directory, cache: source.cache) }
             )
+        case "maya2", "maya3":
+            return try await load(source, modelType: resolvedType,
+                pretrained: { try await Maya2Model.fromPretrained($0, cache: $1) },
+                local: { directory, _ in try await Maya2Model.fromModelDirectory(directory, cache: source.cache) })
         case "melotts", "melo_tts":
             return try await load(
                 source, modelType: resolvedType,
@@ -401,6 +405,12 @@ public enum TTS {
                 pretrained: { try await Zonos2Model.fromPretrained($0, cache: $1) },
                 local: { folder, _ in try await Zonos2Model.fromModelDirectory(folder, cache: source.cache) }
             )
+        case "zonos3", "zonos3_mini":
+            return try await load(
+                source, modelType: resolvedType,
+                pretrained: { try await Zonos3Model.fromPretrained($0, cache: $1, hfToken: hfToken) },
+                local: { folder, _ in try await Zonos3Model.fromModelDirectory(folder) }
+            )
         default:
             throw TTSModelError.unsupportedModelType(resolvedType)
         }
@@ -475,6 +485,7 @@ public enum TTS {
 
     private static func inferModelType(from modelRepo: String) -> String? {
         let lower = modelRepo.lowercased()
+        if lower.contains("zonos3") { return "zonos3" }
         if lower.contains("zonos2") { return "zonos2" }
         if lower.contains("ming-3.0-tts-tiny") { return "lingv3_tts" }
         if lower.contains("ming"), lower.contains("tts"), lower.contains("0.5b") {
@@ -483,6 +494,7 @@ public enum TTS {
         if lower.contains("ming-omni-tts"), lower.contains("16.8b") { return "bailingmm" }
         if lower.contains("tada") { return "tada" }
         if lower.contains("confucius4") { return "confucius4" }
+        if lower.contains("maya2") || lower.contains("maya-2") { return "maya2" }
         if lower.contains("melotts") { return "melotts" }
         if lower.contains("kugelaudio") { return "kugelaudio" }
         if lower.contains("vibevoice") && lower.contains("realtime") {

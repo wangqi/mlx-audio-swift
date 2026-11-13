@@ -60,7 +60,7 @@ let package = Package(
 
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.32.3")),
+        .package(url: "https://github.com/ml-explore/mlx-swift.git", .upToNextMajor(from: "0.33.0")),
         .package(url: "https://github.com/huggingface/swift-transformers.git", .upToNextMajor(from: "1.1.6")),
         .package(url: "https://github.com/huggingface/swift-huggingface.git", .upToNextMajor(from: "0.8.1")),
         .package(url: "https://github.com/facebook/zstd.git", from: "1.5.7")
@@ -114,6 +114,7 @@ let package = Package(
             path: "Sources/MLXAudioTTS",
             exclude: [
                 "Models/KugelAudio/README.md",
+                "Models/Maya2/README.md",
                 "Models/MeloTTS/README.md",
                 "Models/Bark/README.md",
                 "Models/Chatterbox/README.md",
@@ -141,12 +142,14 @@ let package = Package(
                 "Models/VoxCPM/README.md",
                 "Models/VoxCPM2/README.md",
                 "Models/Zonos2/README.md",
+                "Models/Zonos3/README.md",
                 "Models/VibeVoiceTTS/README.md",
                 "Models/VoxtralTTS/README.md",
                 "Models/StyleTTS2/KittenTTS/README.md",
                 "Models/StyleTTS2/Kokoro/README.md",
             ],
-            resources: [.copy("Models/OuteTTS/outetts_default_speaker.json")]
+            resources: [.copy("Models/OuteTTS/outetts_default_speaker.json"),
+                        .copy("Models/Maya2/maya2_normalization_data.json")]
         ),
 
         // MARK: - MLXAudioSTT
@@ -161,6 +164,7 @@ let package = Package(
                 .product(name: "MLXFast", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXRandom", package: "mlx-swift"),
+                .product(name: "MLXFFT", package: "mlx-swift"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Transformers", package: "swift-transformers"),
             ],

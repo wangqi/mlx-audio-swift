@@ -35,7 +35,7 @@ private let metalAvailable: Bool = {
 @testable import MLXAudioTTS
 @testable import MLXAudioCodecs
 
-private func loadTTSNetworkFixture(sampleRate: Int, maxSamples: Int) throws -> MLXArray {
+private func loadTTSNetworkFixture(sampleRate: Int, maxSamples: Int) throws -> MaterializedArray {
     let audioURL = Bundle.module.url(
         forResource: "intention",
         withExtension: "wav",
@@ -43,7 +43,7 @@ private func loadTTSNetworkFixture(sampleRate: Int, maxSamples: Int) throws -> M
     )!
     let (_, audio) = try loadAudioArray(from: audioURL, sampleRate: sampleRate)
     let sampleCount = min(audio.shape[0], maxSamples)
-    return audio[0..<sampleCount]
+    return audio[0..<sampleCount].materialized()
 }
 
 private func writeTestFile(_ url: URL, contents: String) throws {
@@ -622,9 +622,11 @@ private func makeTinyQwen3TTSModel(
     ttsModelType: String,
     includeSpeechEncoder: Bool,
     speakerIDEntries: String = "",
-    dialectEntries: String = ""
+    dialectEntries: String = "",
+    speakerEncoderConfig: String = ""
 ) async throws -> (model: Qwen3TTSModel, tokenizerDirectory: URL) {
     let tokenizerDirectory = try makeTinyQwenTokenizerDirectory()
+    let speakerEncoderJSON = speakerEncoderConfig.isEmpty ? "" : #""speaker_encoder_config": "# + speakerEncoderConfig + ","
     let encoderConfigJSON = includeSpeechEncoder ? #""encoder_config": {},"# : ""
     let spkIdJSON = speakerIDEntries.isEmpty ? "" : #""spk_id": {"# + speakerIDEntries + "},"
     let spkDialectJSON = dialectEntries.isEmpty ? "" : #""spk_is_dialect": {"# + dialectEntries + "},"
@@ -640,6 +642,7 @@ private func makeTinyQwen3TTSModel(
       "tts_bos_token_id": 22,
       "tts_eos_token_id": 23,
       "sample_rate": 24000,
+      \(speakerEncoderJSON)
       "talker_config": {
         "vocab_size": 3072,
         "hidden_size": 16,
@@ -693,7 +696,7 @@ private func makeTinyQwen3TTSModel(
 }
 
 private func collectQwen3TTSStream(
-    _ stream: sending AsyncThrowingStream<AudioGeneration, Error>
+    _ stream: AsyncThrowingStream<AudioGeneration, Error>
 ) async throws -> sending (tokenCount: Int, infoCount: Int, lastAudio: MLXArray?) {
     var tokenCount = 0
     var infoCount = 0
@@ -841,22 +844,22 @@ private final class ProxyCancellationProbeModel: SpeechGenerationModel, @uncheck
     func generate(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
-        MLXArray.zeros([0], dtype: .float32)
+    ) async throws -> MaterializedArray {
+        MLXArray.zeros([0], dtype: .float32).materialized()
     }
 
     func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         let (stream, continuation) = AsyncThrowingStream<AudioGeneration, Error>.makeStream()
         let task = Task {
             do {
@@ -881,12 +884,12 @@ private final class ProxyCancellationProbeModel: SpeechGenerationModel, @uncheck
     func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters,
         streamingInterval: Double
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         generateStream(
             text: text,
             voice: voice,
@@ -999,6 +1002,56 @@ struct Qwen3TTSTests {
         }
     }
 
+    @Test func baseModelUsesReferenceAudioSpeakerEmbeddingWithoutTranscript() async throws {
+        let fixture = try await makeTinyQwen3TTSModel(
+            ttsModelType: "base",
+            includeSpeechEncoder: false,
+            speakerEncoderConfig: """
+            {"enc_dim": 16, "enc_channels": [16, 16, 16, 16, 48], "enc_attention_channels": 8,
+             "enc_res2net_scale": 2, "enc_se_channels": 8}
+            """
+        )
+        defer { cleanupTemporaryArtifactDirectory(fixture.tokenizerDirectory) }
+        let model = fixture.model
+        let refAudio = MLXArray((0 ..< 6000).map { i in 0.5 * sin(2 * Float.pi * 440.0 * Float(i) / 24000.0) })
+        let textEmbeddings = model.talker.textProjection(model.talker.getTextEmbeddings()(
+            MLXArray(0 ..< 64).reshaped(1, -1)))
+
+        let (plain, _, _) = model.prepareGenerationInputs(text: "one", language: "auto", instruct: nil)
+        let (prefill, _, _) = model.prepareGenerationInputs(
+            text: "one", language: "auto", instruct: nil, refAudio: refAudio)
+        let embedding = try #require(model.extractSpeakerEmbedding(refAudio))
+
+        try #require(prefill.shape == [1, plain.dim(1) + 1, 16])
+        let expectedSlot = textEmbeddings[0..., 21 ..< 22, 0...] + embedding.reshaped(1, 1, -1)
+        #expect(allClose(prefill[0..., 6 ..< 7, 0...], expectedSlot, atol: 1e-5).item(Bool.self))
+        #expect(allClose(prefill[0..., 7..., 0...], plain[0..., 6..., 0...], atol: 1e-5).item(Bool.self))
+    }
+
+    @Test func speakerEncoderMelMatchesReference() {
+        let samples: [Float] = (0 ..< 6000).map { i in
+            let phase = 2 * Double.pi * Double(i) / 24000.0
+            let value: Double = 0.5 * sin(440.0 * phase) + 0.25 * sin(3000.0 * phase)
+            return Float(value)
+        }
+        let signal = MLXArray(samples)
+        let mel = speakerEncoderMelSpectrogram(signal, sampleRate: 24000)
+        #expect(mel.shape == [23, 128])
+
+        let reference: [Int: [Float]] = [
+            0: [-1.092172, 1.015472, -3.563627, 0.260005],
+            11: [-9.130633, 1.482101, -11.512925, 0.213109],
+            22: [-1.559293, 1.320042, -4.581027, 0.291832],
+        ]
+        let values = mel.asArray(Float.self)
+        for (frame, expected) in reference {
+            for (bin, value) in zip([0, 16, 64, 77], expected) {
+                let actual = values[frame * 128 + bin]
+                #expect(abs(actual - value) < 2e-3, "frame \(frame) bin \(bin): \(actual)")
+            }
+        }
+    }
+
     @Test func interleavedMropeHandlesTransposedFrequencies() {
         // Run with TEST_RUNNER_MTL_DEBUG_LAYER=1 to catch the scalar-gather regression.
         let rotary = TalkerRotaryEmbedding(dim: 12, mropeSection: [2, 2, 2])
@@ -1055,6 +1108,120 @@ struct Qwen3TTSTests {
         #expect(streamed.shape == full.shape)
         #expect(abs(full).max().item(Float.self) < 1)
         #expect(abs(streamed - full).max().item(Float.self) < 1e-4)
+    }
+
+    @Test func primedStreamingDecodeMatchesDecodingAfterTheReferenceTail() async throws {
+        let fixture = try await makeTinyQwen3TTSModel(
+            ttsModelType: "voice_design", includeSpeechEncoder: false)
+        defer { cleanupTemporaryArtifactDirectory(fixture.tokenizerDirectory) }
+        let decoder = try #require(fixture.model.speechTokenizer).decoder
+        let biases = decoder.parameters().flattened()
+            .filter { $0.0.hasSuffix(".bias") }
+            .map { ($0.0, MLXArray.ones($0.1.shape) * 0.01) }
+        decoder.update(parameters: ModuleParameters.unflattened(biases))
+        let reference = MLXRandom.randInt(low: 0, high: 16, [1, 2, 30], key: MLXRandom.key(1)).asType(.int32)
+        let generated = MLXRandom.randInt(low: 0, high: 16, [1, 2, 6], key: MLXRandom.key(2)).asType(.int32)
+
+        // Non-streaming ICL decodes the reference and the generated codes together, then trims the reference.
+        let tail = reference[0..., 0..., 5...]
+        let joint = decoder(concatenated([tail, generated], axis: -1))
+        let samplesPerCode = joint.dim(-1) / 31
+        let expected = joint[0..., 0..., (25 * samplesPerCode)...]
+
+        decoder.resetStreamingState()
+        let unprimed = concatenated(
+            stride(from: 0, to: 6, by: 2).map { decoder.streamingStep(generated[0..., 0..., $0 ..< ($0 + 2)]) },
+            axis: -1)
+        decoder.resetStreamingState()
+        decoder.primeStreamingState(referenceCodes: reference)
+        let primed = concatenated(
+            stride(from: 0, to: 6, by: 2).map { decoder.streamingStep(generated[0..., 0..., $0 ..< ($0 + 2)]) },
+            axis: -1)
+        decoder.resetStreamingState()
+
+        #expect(primed.shape == expected.shape)
+        #expect(abs(primed - expected).max().item(Float.self) < 1e-4)
+        #expect(abs(unprimed - expected).max().item(Float.self) > 1e-3)
+    }
+
+    @Test func decodeKeepsFramesWhoseFirstCodebookIdIsZero() async throws {
+        let fixture = try await makeTinyQwen3TTSModel(
+            ttsModelType: "voice_design", includeSpeechEncoder: false)
+        defer { cleanupTemporaryArtifactDirectory(fixture.tokenizerDirectory) }
+        let speechTokenizer = try #require(fixture.model.speechTokenizer)
+        for dtype in [DType.int32, .uint32] {
+            let codes = MLXArray([3, 1, 0, 5, 7, 2, 0, 0, 2, 4] as [Int32])
+                .asType(dtype).reshaped(1, 5, 2)
+
+            let (_, lengths) = speechTokenizer.decode(codes)
+
+            #expect(lengths.asArray(Int32.self) == [Int32(5 * speechTokenizer.decodeUpsampleRate)])
+        }
+    }
+
+    @Test func decodeExcludesNegativeRightPaddingAndDecodesItAsZero() async throws {
+        let fixture = try await makeTinyQwen3TTSModel(
+            ttsModelType: "voice_design", includeSpeechEncoder: false)
+        defer { cleanupTemporaryArtifactDirectory(fixture.tokenizerDirectory) }
+        let speechTokenizer = try #require(fixture.model.speechTokenizer)
+        let codebooks = speechTokenizer.decoder.parameters().flattened()
+            .filter { $0.0.hasSuffix("embedding_sum") }
+            .map { ($0.0, MLXRandom.normal($0.1.shape, key: MLXRandom.key(0))) }
+        speechTokenizer.decoder.update(parameters: ModuleParameters.unflattened(codebooks))
+        let padded = MLXArray([3, 1, 0, 2, -1, -1, -1, -1] as [Int32]).reshaped(1, 4, 2)
+        let zeroPadded = MLXArray([3, 1, 0, 2, 0, 0, 0, 0] as [Int32]).reshaped(1, 4, 2)
+
+        let (wav, lengths) = speechTokenizer.decode(padded)
+        let (zeroWav, _) = speechTokenizer.decode(zeroPadded)
+
+        #expect(lengths.asArray(Int32.self) == [Int32(2 * speechTokenizer.decodeUpsampleRate)])
+        #expect(wav.shape == zeroWav.shape)
+        #expect(abs(wav - zeroWav).max().item(Float.self) == 0)
+    }
+
+    @Test func decodeChunkKeepsFramesWhoseFirstCodebookIdIsZero() async throws {
+        let fixture = try await makeTinyQwen3TTSModel(
+            ttsModelType: "voice_design", includeSpeechEncoder: false)
+        defer { cleanupTemporaryArtifactDirectory(fixture.tokenizerDirectory) }
+        let speechTokenizer = try #require(fixture.model.speechTokenizer)
+        for dtype in [DType.int32, .uint32] {
+            let codes = MLXArray([3, 1, 0, 5, 7, 2, 0, 0] as [Int32])
+                .asType(dtype).reshaped(1, 4, 2)
+
+            let audio = fixture.model.decodeChunk(codes)
+
+            #expect(audio.dim(0) == 4 * speechTokenizer.decodeUpsampleRate)
+        }
+    }
+
+    @Test func decoderTransformerAttendsWithinSlidingWindow() throws {
+        MLXRandom.seed(0)
+        let json = """
+            {"latent_dim": 8, "hidden_size": 16, "intermediate_size": 32, "head_dim": 4,
+             "num_attention_heads": 4, "num_key_value_heads": 4, "num_hidden_layers": 2,
+             "layer_scale_initial_scale": 1.0, "sliding_window": 16}
+            """
+        let config = try JSONDecoder().decode(Qwen3TTSTokenizerDecoderConfig.self, from: Data(json.utf8))
+        let transformer = DecoderTransformer(config: config)
+        let x = MLXRandom.normal([1, 100, 8], key: MLXRandom.key(0))
+
+        let query = MLXArray(Int32(0) ..< 100).reshaped(-1, 1)
+        let key = MLXArray(Int32(0) ..< 100).reshaped(1, -1)
+        let allowed = (key .<= query) .&& (key .> query - 16)
+        let reference = transformer(x, mask: which(allowed, Float(0), -Float.infinity))
+
+        let cache = transformer.makeCache()
+        var chunks = [MLXArray]()
+        var start = 0
+        for size in [25, 1, 1, 10, 25, 1, 30, 7] {
+            chunks.append(transformer(x[0..., start ..< (start + size)], cache: cache))
+            start += size
+        }
+
+        #expect(abs(transformer(x) - reference).max().item(Float.self) < 1e-5)
+        // Chunked matmuls can use different TF32 kernels on M5 and later,
+        // so allow their rounding differences from full-sequence execution.
+        #expect(abs(concatenated(chunks, axis: 1) - reference).max().item(Float.self) < 5e-3)
     }
 
     @Test func customVoicePromptSplitsSpeakerAndInstruction() {
@@ -1187,7 +1354,7 @@ struct Qwen3TTSTests {
         let rawAudio = try await fixture.model.generate(
             text: "target voice prompt one two three four five",
             voice: nil,
-            refAudio: MLXArray(refSamples),
+            refAudio: (MLXArray(refSamples)).materialized(),
             refText: "one two three four five one two three four five",
             language: "English",
             generationParameters: parameters
@@ -1200,7 +1367,7 @@ struct Qwen3TTSTests {
             fixture.model.generateStream(
                 text: "target voice prompt one two three four five",
                 voice: nil,
-                refAudio: MLXArray(refSamples),
+                refAudio: (MLXArray(refSamples)).materialized(),
                 refText: "one two three four five one two three four five",
                 language: "English",
                 generationParameters: parameters,
@@ -1300,6 +1467,24 @@ struct SopranoTextCleaningTests {
         #expect(cleaned3.contains("second"), "Should expand 2nd to second")
 
         print("\u{001B}[32mText cleaning tests passed!\u{001B}[0m")
+    }
+
+    @Test func ordinalsReadAsOrdinals() {
+        #expect(cleanTextForSoprano("July 4th") == "july fourth")
+        #expect(cleanTextForSoprano("the 20th century") == "the twentieth century")
+        #expect(cleanTextForSoprano("101st") == "one hundred first")
+        #expect(cleanTextForSoprano("112th") == "one hundred twelfth")
+        #expect(cleanTextForSoprano("100th") == "one hundredth")
+        #expect(cleanTextForSoprano("10K") == "ten thousand")
+        #expect(cleanTextForSoprano("25M") == "twenty five million")
+    }
+
+    @Test func decimalNumbersReadWithPoint() {
+        #expect(cleanTextForSoprano("It is 3.14 approx.") == "it is three point fourteen approx.")
+        #expect(cleanTextForSoprano("I have 2.5 liters") == "i have two point five liters")
+        #expect(cleanTextForSoprano("version 2.0") == "version two point zero")
+        #expect(cleanTextForSoprano("It costs $3.50 today.") == "it costs three dollars, fifty cents today.")
+        #expect(cleanTextForSoprano("I have 5 cats") == "i have five cats")
     }
 }
 
@@ -2440,6 +2625,25 @@ struct KokoroTTSTests {
     }
 }
 
+struct KokoroLexiconTests {
+
+    @Test func accentedWordsUseTheirASCIIEntry() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(#"{"cafe": "kæfˈA", "naive": "nɑˈiv"}"#.utf8).write(to: dir.appendingPathComponent("us_gold.json"))
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("us_silver.json"))
+        let lexicon = Lexicon(british: false, directory: dir)
+
+        func phonemes(_ word: String) -> String? {
+            lexicon.transcribe(MToken(text: word, tokenRange: word.startIndex..<word.endIndex, whitespace: ""), ctx: TokenContext()).0
+        }
+        #expect(phonemes("café") == phonemes("cafe"))
+        #expect(phonemes("naïve") == phonemes("naive"))
+        #expect(phonemes("café") != nil)
+    }
+}
+
 // MARK: - Kokoro Multilingual Processor Tests
 
 @Suite("KokoroMultilingualProcessor")
@@ -2786,8 +2990,8 @@ struct IndexTTSTests {
             ),
             (
                 "What's this? It's $12,345.",
-                "What is this? It is twelve thousand three hundred forty five dollars",
-                "WHAT IS THIS? IT IS TWELVE THOUSAND THREE HUNDRED FORTY FIVE DOLLARS"
+                "What is this? It is twelve thousand three hundred forty five dollars.",
+                "WHAT IS THIS? IT IS TWELVE THOUSAND THREE HUNDRED FORTY FIVE DOLLARS."
             ),
             (
                 "call 1 2 3 now",
@@ -2825,6 +3029,28 @@ struct IndexTTSTests {
             let normalized = IndexTTSTextNormalizer.normalize(input)
             #expect(normalized == expectedNormalized)
             #expect(IndexTTSTextNormalizer.tokenizeByCJKChar(normalized) == expectedTokenized)
+        }
+    }
+
+    @Test func normalizerReadsDollarsAndCentsSeparately() {
+        let cases = [
+            ("It costs $2.50 today.", "It costs two dollars fifty cents today."),
+            ("Pay $1,299.99 now.", "Pay one thousand two hundred ninety nine dollars ninety nine cents now."),
+            ("It costs $0.99 each.", "It costs ninety nine cents each."),
+            ("It costs $3.5.", "It costs three dollars fifty cents."),
+            ("Only $1 left.", "Only one dollar left."),
+            ("It costs $5.", "It costs five dollars."),
+            ("I have $5 10 apples.", "I have five dollars ten apples."),
+            ("Prices: $5,$10,$20.", "Prices, five dollars,ten dollars,twenty dollars."),
+            ("Pay $5, or $10.", "Pay five dollars, or ten dollars."),
+            (
+                "Prices: $1,000,$2,500.25.",
+                "Prices, one thousand dollars,two thousand five hundred dollars twenty five cents."
+            ),
+        ]
+
+        for (input, expected) in cases {
+            #expect(IndexTTSTextNormalizer.normalize(input) == expected)
         }
     }
 
@@ -3078,7 +3304,7 @@ struct IndexTTSTests {
         let generated = try await model.generate(
             text: "a",
             voice: nil,
-            refAudio: MLXArray(referenceSamples),
+            refAudio: (MLXArray(referenceSamples)).materialized(),
             refText: nil,
             language: nil,
             generationParameters: GenerateParameters(maxTokens: 2, temperature: 0)
@@ -3089,7 +3315,7 @@ struct IndexTTSTests {
         let stream = model.generateStream(
             text: "a",
             voice: nil,
-            refAudio: MLXArray(referenceSamples),
+            refAudio: (MLXArray(referenceSamples)).materialized(),
             refText: nil,
             language: nil,
             generationParameters: GenerateParameters(maxTokens: 2),

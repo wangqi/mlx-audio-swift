@@ -112,6 +112,75 @@ struct MimiConvAdapterTests {
     }
 }
 
+struct MimiAttentionTests {
+
+    private func attention(context: Int) -> MLXAudioCodecs.Attention {
+        MLXRandom.seed(0)
+        return MLXAudioCodecs.Attention(cfg: TransformerConfig(
+            dModel: 16, numHeads: 2, numLayers: 1, causal: true, normFirst: true,
+            biasFF: false, biasAttn: false, layerScale: nil, positionalEmbedding: "rope",
+            useConvBlock: false, crossAttention: false, convKernelSize: 3, useConvBias: false,
+            gating: false, norm: "layer_norm", context: context, maxPeriod: 10000,
+            maxSeqLen: 64, kvRepeat: 1, dimFeedforward: 32, convLayout: false
+        ))
+    }
+
+    @Test func attentionWindowHoldsAcrossChunking() {
+        let context = 4
+        // Chunk sizes can select different Metal kernels, including TF32 matmuls.
+        let tolerance: Float = 2e-3
+        let attn = attention(context: context)
+        let xs = MLXRandom.normal([1, 12, 16])
+        let oneShot = attn(xs, cache: KVCacheSimple())
+
+        for i in 0..<12 {
+            let window = xs[0..., max(0, i - context + 1) ... i]
+            let alone = attn(window, cache: KVCacheSimple())[0..., -1]
+            #expect(MLX.max(MLX.abs(alone - oneShot[0..., i])).item(Float.self) < tolerance, "position \(i)")
+        }
+
+        for chunk in [1, 3, 5] {
+            let cache = KVCacheSimple()
+            let parts = stride(from: 0, to: 12, by: chunk).map { start in
+                attn(xs[0..., start ..< min(start + chunk, 12)], cache: cache)
+            }
+            let streamed = concatenated(parts, axis: 1)
+            #expect(MLX.max(MLX.abs(streamed - oneShot)).item(Float.self) < tolerance, "chunk \(chunk)")
+        }
+    }
+}
+
+struct MimiEncodeStepTests {
+
+    @Test func stepsShorterThanAFrameReturnNoCodes() {
+        let seanet = SeanetConfig(
+            dimension: 8, channels: 1, causal: true, nfilters: 2, nresidualLayers: 1, ratios: [2, 2],
+            ksize: 3, residualKsize: 3, lastKsize: 3, dilationBase: 2, padMode: .constant, trueSkip: true, compress: 2
+        )
+        let transformer = TransformerConfig(
+            dModel: 8, numHeads: 2, numLayers: 1, causal: true, normFirst: true, biasFF: false, biasAttn: false,
+            layerScale: 0.01, positionalEmbedding: "rope", useConvBlock: false, crossAttention: false,
+            convKernelSize: 3, useConvBias: true, gating: false, norm: "layer_norm", context: 16, maxPeriod: 10_000,
+            maxSeqLen: 64, kvRepeat: 1, dimFeedforward: 16, convLayout: true
+        )
+        let mimi = Mimi(cfg: MimiConfig(
+            channels: 1, sampleRate: 80, frameRate: 10, renormalize: true, seanet: seanet,
+            transformer: transformer, quantizerNQ: 2, quantizerBins: 8, quantizerDim: 4
+        ))
+        let frameSize = 8
+        let audio = MLXRandom.uniform(low: -1, high: 1, [1, 1, 4 * frameSize + 3])
+
+        #expect(mimi.encodeStep(audio[.ellipsis, ..<3]).shape == [1, 2, 0])
+
+        mimi.resetState()
+        let codes = stride(from: 0, to: audio.dim(2), by: 2 * frameSize).map {
+            mimi.encodeStep(audio[.ellipsis, $0 ..< min(audio.dim(2), $0 + 2 * frameSize)])
+        }
+        #expect(codes.last?.shape == [1, 2, 0])
+        #expect(MLX.concatenated(codes, axis: 2).shape == [1, 2, 4])
+    }
+}
+
 struct SharedDSPTests {
 
     @Test func hammingWindowSupportsPeriodicAndSymmetricVariants() {
@@ -1281,5 +1350,51 @@ struct CodecNetworkTests {
         #expect(encoded.codes.shape[1] == model.config.nCodebooks)
         #expect(encoded.originalLength == waveform.shape[1])
         #expect(decoded.shape == waveform.shape)
+    }
+}
+
+struct MimiStreamingTests {
+
+    private func makeTinyMimi() throws -> Mimi {
+        let seanet = SeanetConfig(
+            dimension: 8, channels: 1, causal: true, nfilters: 2, nresidualLayers: 1, ratios: [2, 2],
+            ksize: 3, residualKsize: 3, lastKsize: 3, dilationBase: 2, padMode: .constant, trueSkip: true, compress: 2
+        )
+        let transformer = TransformerConfig(
+            dModel: 8, numHeads: 2, numLayers: 1, causal: true, normFirst: true, biasFF: false, biasAttn: false,
+            layerScale: 0.01, positionalEmbedding: "rope", useConvBlock: false, crossAttention: false,
+            convKernelSize: 3, useConvBias: true, gating: false, norm: "layer_norm", context: 16, maxPeriod: 10_000,
+            maxSeqLen: 64, kvRepeat: 1, dimFeedforward: 16, convLayout: true
+        )
+        return try withRandomState(MLXRandom.RandomState(seed: 0)) {
+            let mimi = Mimi(cfg: MimiConfig(
+                channels: 1, sampleRate: 80, frameRate: 10, renormalize: true, seanet: seanet,
+                transformer: transformer, quantizerNQ: 2, quantizerBins: 8, quantizerDim: 4
+            ))
+            let codebooks = mimi.parameters().flattened().compactMap { key, value -> (String, MLXArray)? in
+                if key.hasSuffix("embedding_sum") { return (key, MLXRandom.normal(value.shape)) }
+                if key.hasSuffix("cluster_usage") { return (key, MLXArray.ones(value.shape)) }
+                return nil
+            }
+            try mimi.update(parameters: ModuleParameters.unflattened(codebooks), verify: .none)
+            return mimi
+        }
+    }
+
+    @Test func resetStateStartsTheNextStreamFresh() throws {
+        let (first, second) = withRandomState(MLXRandom.RandomState(seed: 1)) {
+            (MLXRandom.uniform(low: -1, high: 1, [1, 1, 36]), MLXRandom.uniform(low: -1, high: 1, [1, 1, 64]))
+        }
+
+        let mimi = try makeTinyMimi()
+        eval(mimi.encodeStep(first))
+        mimi.resetState()
+        let codes = mimi.encodeStep(second)
+        let expected = try makeTinyMimi().encodeStep(second)
+        eval(codes, expected)
+
+        #expect(codes.shape == [1, 2, 8])
+        #expect(codes.shape == expected.shape)
+        #expect(MLX.all(codes .== expected).item(Bool.self))
     }
 }

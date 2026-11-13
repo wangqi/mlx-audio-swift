@@ -75,6 +75,9 @@ private func ordinalToWords(_ n: Int) -> String {
         }
         return tens[tensVal] + " " + (ordinals[onesVal] ?? ones[onesVal] + "th")
     }
+    if n % 100 != 0 {
+        return numToWords(n - n % 100) + " " + ordinalToWords(n % 100)
+    }
     let base = numToWords(n)
     if base.hasSuffix("y") {
         return String(base.dropLast()) + "ieth"
@@ -248,7 +251,7 @@ private func normalizeNumbers(_ text: String) -> String {
     }
 
     // digit + K/M/B/T pattern
-    if let regex = try? NSRegularExpression(pattern: "\\d[KMBTkmbt]", options: []) {
+    if let regex = try? NSRegularExpression(pattern: "\\b\\d+[KMBTkmbt]\\b", options: []) {
         let range = NSRange(result.startIndex..., in: result)
         let matches = regex.matches(in: result, range: range).reversed()
         for match in matches {
@@ -279,6 +282,18 @@ private func normalizeNumbers(_ text: String) -> String {
             if let matchRange = Range(match.range, in: result) {
                 let matchStr = String(result[matchRange]).dropFirst() // Remove $
                 result.replaceSubrange(matchRange, with: expandDollars(String(matchStr)))
+            }
+        }
+    }
+
+    // Decimal numbers: read the point, then each side as a number
+    if let regex = try? NSRegularExpression(pattern: "\\d+\\.\\d+", options: []) {
+        let range = NSRange(result.startIndex..., in: result)
+        let matches = regex.matches(in: result, range: range).reversed()
+        for match in matches {
+            if let matchRange = Range(match.range, in: result) {
+                let matchStr = String(result[matchRange])
+                result.replaceSubrange(matchRange, with: matchStr.replacingOccurrences(of: ".", with: " point "))
             }
         }
     }

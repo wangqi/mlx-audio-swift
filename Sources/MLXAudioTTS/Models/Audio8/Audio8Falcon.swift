@@ -6,8 +6,6 @@ import MLX
 import MLXAudioCore
 import MLXNN
 
-// MLXAudioCore re-exports a compile(shapeless:_:) with the same signature as MLX's, so the bare call is
-// ambiguous when both modules are imported; qualify it // wangqi modified 2026-10-30
 private let audio8FalconSwiGLU: @Sendable (MLXArray, MLXArray) -> MLXArray = MLX.compile(shapeless: true) { gate, x in
     silu(gate) * x
 }

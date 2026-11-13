@@ -482,13 +482,12 @@ final class DecoderTransformer: Module {
         let posEmb = rotaryEmb(x, positionIds: posIds)
 
         var causalMask = mask
-        if causalMask == nil, seqLen > 1 {
-            let totalLen = offset + seqLen
-            var fullMask = MultiHeadAttention.createAdditiveCausalMask(totalLen).asType(x.dtype)
-            if totalLen > seqLen {
-                fullMask = fullMask[(totalLen - seqLen) ..< totalLen, 0...]
-            }
-            causalMask = fullMask
+        if causalMask == nil, seqLen > 1,
+           case .array(let windowMask) = createAttentionMask(
+               h: x, cache: cache?.first, windowSize: config.slidingWindow, returnArray: true
+           )
+        {
+            causalMask = windowMask
         }
 
         for (i, layer) in layers.enumerated() {
@@ -498,7 +497,7 @@ final class DecoderTransformer: Module {
     }
 
     func makeCache() -> [any KVCache] {
-        layers.map { _ in KVCacheSimple() }
+        layers.map { _ in RotatingKVCache(maxSize: config.slidingWindow) }
     }
 }
 
@@ -970,8 +969,17 @@ final class Qwen3TTSSpeechTokenizerDecoder: Module {
         }
     }
 
+    /// Primes the streaming state with the tail of the reference codes ([batch, quantizers, time]), so the
+    /// next streamed codes are decoded with the reference as left context, like the non-streaming ICL path.
+    /// The decoded reference audio is discarded.
+    func primeStreamingState(referenceCodes: MLXArray, contextSize: Int = 25) {
+        let time = referenceCodes.dim(2)
+        guard contextSize > 0, time > 0 else { return }
+        _ = streamingStep(referenceCodes[0..., 0..., max(0, time - contextSize)...])
+    }
+
     /// Incrementally decode only new codec tokens.
-    func streamingStep(_ codes: MLXArray) -> sending MLXArray {
+    func streamingStep(_ codes: MLXArray) -> MaterializedArray {
         if transformerCache == nil {
             transformerCache = preTransformer.makeCache()
         }
@@ -1006,13 +1014,7 @@ final class Qwen3TTSSpeechTokenizerDecoder: Module {
         }
 
         let clipped = clip(wav, min: -1, max: 1)
-        eval(clipped)
-        // This final clipped output is not stored in the decoder's caches.
-        // Complete its lazy graph before transfer so subsequent decoder steps
-        // cannot race with evaluation by the consumer. Swift cannot infer this
-        // independence from MLX's tensor operations.
-        nonisolated(unsafe) let output = clipped
-        return output
+        return clipped.materialized()
     }
 
     func chunkedDecode(_ codes: MLXArray, chunkSize: Int = 300, leftContextSize: Int = 25) -> MLXArray {
@@ -1069,11 +1071,11 @@ final class Qwen3TTSSpeechTokenizer: Module {
 
     func decode(_ audioCodes: MLXArray) -> (MLXArray, MLXArray) {
         // audioCodes: [batch, time, num_quantizers]
-        let codes = audioCodes.transposed(0, 2, 1) // [batch, num_quantizers, time]
+        let codes = maximum(audioCodes, 0).transposed(0, 2, 1) // [batch, num_quantizers, time]
         let wav = decoder.chunkedDecode(codes).squeezed(axis: 1)
 
         // Calculate valid lengths
-        let audioLengths = (audioCodes[0..., 0..., 0] .> 0).sum(axis: 1).asType(.int32) * Int32(decodeUpsampleRate)
+        let audioLengths = (audioCodes[0..., 0..., 0] .>= 0).sum(axis: 1).asType(.int32) * Int32(decodeUpsampleRate)
         return (wav, audioLengths)
     }
 
@@ -1088,8 +1090,7 @@ final class Qwen3TTSSpeechTokenizer: Module {
         while startIndex < totalTokens {
             let endIndex = min(startIndex + chunkTokens, totalTokens)
             let chunk = codes[0..., 0..., startIndex ..< endIndex]
-            var wavChunk = decoder.streamingStep(chunk)
-            wavChunk = wavChunk.squeezed(axis: 1)
+            let wavChunk = decoder.streamingStep(chunk).squeezed(axis: 1)
             eval(wavChunk)
             chunks.append(wavChunk)
             Memory.clearCache()

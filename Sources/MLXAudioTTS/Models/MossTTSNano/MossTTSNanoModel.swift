@@ -455,11 +455,11 @@ public final class MossTTSNanoModel: Module, SpeechGenerationModel, @unchecked S
     public func generate(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) async throws -> sending MLXArray {
+    ) async throws -> MaterializedArray {
         _ = voice
         _ = refText
         _ = language
@@ -510,21 +510,19 @@ public final class MossTTSNanoModel: Module, SpeechGenerationModel, @unchecked S
         // MOSS-TTS-Nano decodes stereo audio [N, 2]; mix to mono [N] for standard playback.
         // wangqi modified 2026-05-04
         let decoded = try decodeAudioTokenIDs(audioTokenIDs, numQuantizers: config.nVQ)
-        return decoded.ndim == 2 && decoded.dim(1) > 1 ? mean(decoded, axis: 1) : decoded
+        return (decoded.ndim == 2 && decoded.dim(1) > 1 ? mean(decoded, axis: 1) : decoded).materialized()
     }
 
     public func generateStream(
         text: String,
         voice: String?,
-        refAudio: sending MLXArray?,
+        refAudio: MaterializedArray?,
         refText: String?,
         language: String?,
         generationParameters: GenerateParameters
-    ) -> sending AsyncThrowingStream<AudioGeneration, Error> {
-        let refAudio = SendingBox(refAudio)
+    ) -> AsyncThrowingStream<AudioGeneration, Error> {
         return AsyncThrowingStream { continuation in
             let task = Task { @Sendable in
-                let refAudio = refAudio.take()
                 do {
                     let audio = try await self.generate(
                         text: text,
