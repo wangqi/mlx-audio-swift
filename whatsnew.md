@@ -1,53 +1,59 @@
-# mlx-audio-swift: What's New (tag-20261024 → tag-20261030)
+# mlx-audio-swift: What's New (tag-20261030 → tag-20261113)
 
-Merged upstream `Blaizzy/mlx-audio-swift` `main` into our fork on 2026-10-30 (merge `50ba736`).
-**31 upstream commits**, no conflicts. 15 fork markers were dropped as moot, one compile fix was folded
-into the merge, and one fork patch was added on `tag-20261030` (Phonon `model_type`, §3).
+Merged upstream `Blaizzy/mlx-audio-swift` `main` into our fork on 2026-11-13 (merge `36c146f`, of `cf095e0`).
+**43 upstream commits**. Three files conflicted, all resolved (§3). Two fork markers were dropped as moot.
 
-| | tag-20261024 | tag-20261030 |
+| | tag-20261030 | tag-20261113 |
 |---|---|---|
-| Head | `4ef9820` (`116f2eb` with notes) | `50ba736` (merge of `d4fa7be`) |
-| Diffstat, `Sources/` | | 173 files, +24051 / −903 |
-| Diffstat, `Tests/` | | 38 files, +5412 / −3 |
-| Dependency pins | mlx-swift ≥ 0.32.3 | mlx-swift ≥ 0.32.3, **+ facebook/zstd ≥ 1.5.7**, + `MLXFast` product |
+| Head | `d084891` | `36c146f` (merge of `cf095e0`) |
+| Diffstat, `Sources/` | | 122 files, +6332 / −958 |
+| Diffstat, `Tests/` | | 31 files, +2445 / −45 |
+| Dependency pins | mlx-swift ≥ 0.32.3 | **mlx-swift ≥ 0.33.0**, + `MLXFFT` product on MLXAudioSTT |
 
 Integration doc: `helper/docs/mlx-audio-swift.md`. Consumers: `libs/audio/mlxaudio/`, `libs/audio/voiceclone/mlx/`.
-Shipped model list: `helper/mlxaudio_model_test.json`.
+Shipped model list: `helper/mlxaudio_model_test.json` (28 rows).
 
-This range is mostly new model families: 20 new TTS types and 1 new STT type, all in new folders.
-Four commits change the output of models we already ship. **#350 and #315 change Qwen3-TTS audio.** #350
-fixes a click at every chunk join on the streaming path, which is the app's speak path. #315 makes the
-cloned-voice (ICL) prefill run in the talker's dtype. #346 and #349 change how Parakeet-family and most
-other STT `generateStream` calls deliver tokens. None of these is a ship-blocker. The only blocker found
-was outside the code. On 2026-10-21 the HF repo `gradium/phonon-31m-en` renamed its `model_type`, and the
-fork now covers that (§3).
+This range is mostly fixes to existing models. There are only two new model families: Maya-2 and ZONOS3-Mini.
+**#360 (`MaterializedArray`) is a source-breaking API change.** Every `refAudio:` argument, every
+`generate()` result and every `.audio` event is now an evaluated, immutable `MaterializedArray`, not a
+`sending MLXArray`. The app needed a 3-line fix (§2). **Eighteen commits change the output of a model we
+ship.** The biggest of these are Qwen3-TTS (#369 decoder sliding window, #371 ICL priming, #378 trim, #352
+speaker mel), the Mimi transformer window (#357), which changes PocketTTS cloning and every Mimi-based decode,
+and the shared mel frontend (#363) used by Qwen3-ASR, GLM-ASR and Voxtral Realtime.
 
 ---
 
 ## 1. Changes
 
-Commits that change the output of a model we ship are marked **[SHIPPED OUTPUT]**. The P10 regression has
-to watch those.
+Commits that change the output of a model we ship are marked **[SHIPPED OUTPUT]**. The P10 regression has to
+watch those.
 
 | Commit / PR | What changed | Path affected | Reaches the app? |
 |---|---|---|---|
-| `d4fa7be` (#350) | **Qwen3-TTS: the upsample conv bias was counted twice at every streaming chunk join.** Now the carried-over tail has the bias subtracted. `generateStream` joins chunks throughout, and `generate()` joins at 300-token chunks (clips over 24 s). Upstream measured SNR 24 dB → 111 dB against a full decode. **[SHIPPED OUTPUT]** | `Qwen3TTS/Qwen3TTSSpeechTokenizer.swift` (`DecoderBlockUpsample`) | Yes: all 4 Qwen3-TTS rows. `MLXAudioSpeaker.chunkStream` always streams. |
-| `a7bd75b` (#315) | Qwen3-TTS ICL: the float32 speaker embedding is cast to the codec-prefix dtype before the concat. Before, it promoted prefill, KV cache and decode to float32 (upstream: 11.7 → 25.3 tok/s). **[SHIPPED OUTPUT]** (numerics; cloned voices only) | `Qwen3TTS/Qwen3TTS.swift` | Yes: Qwen3-TTS Base rows with a Voice Clone build (`VoiceCloneMLXArtifact.qwen3`) |
-| `15d8223` (#346) | Parakeet `generateStream` now yields only "settled" tokens that a later chunk merge cannot revise. Before, a revised merge re-yielded the whole transcript, so appended text doubled. The final `.result` text is unchanged. **[SHIPPED OUTPUT]** for streamed partials | `Parakeet/ParakeetModel.swift` | Yes: Parakeet TDT v3, Parakeet Redux, Phonon-2 (Parakeet backbone). Affects `MLXAudioASR` `.token` accumulation; the app prefers `.result`. |
-| `db17feb` (#349) | **STT `generateStream` no longer blocks the caller.** The new `makeSTTStream` runs the synchronous model on a `Task.detached`. Cancelling the consumer now cancels the producer, which checks `Task.checkCancellation()` per chunk. Applies to Canary, Cohere, FireRed, GLM-ASR, Granite, Lasr, Moonshine, Nemotron, Parakeet, SenseVoice, Voxtral Realtime, Wav2Vec2 and Whisper. Nemotron stream sessions break on `Task.isCancelled`. Behaviour, not numerics. | `MLXAudioSTT/Generation.swift` + 15 models | Yes: every shipped STT row except Qwen3-ASR / MOSS (already async). See R3. |
-| `8fdde52` (#319), `7b431f3`, `66c3d24` | VoxCPM 1 / 1.5. **`loadAudioArray` now loops `AVAudioFile.read` until EOF**: before, it did one read, and AVFoundation can return a partial buffer for compressed files. VoxCPM2 DiT generalised (`VoxCPMLocDiTV2` → `VoxCPMLocDiT(conditioning: .tokens)`, `applyTransposeOutputPadding` default false; same graph for VoxCPM2). TTS loader honours the caller `HubCache` for local folders. | `MLXAudioCore/AudioUtils.swift`, `VoxCPM2/*`, `TTSModel.swift` | `loadAudioArray`: yes (`MLXAudioSpeaker.loadReferenceAudio`). Clone references are local WAVs, so output is expected unchanged; a compressed clip could now be read in full. VoxCPM2: no change expected. |
-| `d60236d` (#314) | Phonon-2.5 STT: `.bps.tar.zst` / `.fermion` containers (zstd), extracted once into `<cache>/mlx-audio/phonon2/<digest>`. **`ModelUtils.resolveModelType` now reads only `config.json`** via the new `resolveModelConfig`, which is cache-first. `parakeet_tdt_five_value` dispatch. `Phonon2Checkpoint.prepare` passes plain Phonon-2 folders through. | `ModelUtils.swift`, `MLXAudioSTT.swift`, `Phonon2/*`, `Package.swift` | Loader only. Phonon-2 row unchanged (not a container). |
-| `d0a133c` (#337) | LongCat TTS. **`SentencePieceTokenizer` lattice is now per Unicode scalar, not per grapheme**, and the vocabulary is keyed by bytes (no NFC/NFD aliasing). **[SHIPPED OUTPUT]** possible for text where grapheme ≠ scalar (combining marks, emoji ZWJ sequences, `\r\n`) | `MLXAudioCore/SentencePieceTokenizer.swift` | MOSS-TTS-Nano (encodes text); SenseVoice / Cohere (prompt ids; decode unaffected) |
-| `e8dd23f` (#341) | Confucius4-TTS. `CAMPPlus` gains `batchnorm_` and `referenceCompatible` (default false) | `Codecs/S3Gen/CAMPPlus.swift` | Chatterbox: defaults unchanged, no output change expected |
-| `0e55a69` (#348) | **Nemotron 3.5 Transcribe** (30B-A4B speech LM). `STT.loadModel(..., hfToken:)`. `"nemotron"`+`"transcribe"` repo names infer `nemotron_transcribe`. `Mamba2Scan` gains a time-step clip (default off). Shared `ExpertLinear` / `NemotronH`. Sortformer `ModulesConfig.init(...)` and `compressSpeakerCache` are public (additive). | `MLXAudioSTT/*`, `MLXAudioCore/LM/*`, `Sortformer/*` | Sortformer: additive. Our Nemotron row (`nemotron-3.5-asr-streaming`) resolves from `config.json` `model_type` and its name has no "transcribe". |
-| `dc28d79` (#342) | Voxtral TTS. `TekkenTokenizer` moved from `MLXAudioSTT/Shared` to `MLXAudioCore` (rename, 89 % similar) | `MLXAudioCore/TekkenTokenizer.swift` | Voxtral Realtime uses it. The app does not reference the type. |
-| `7eb6348`, `5935faf`, `fe2c182` | VibeVoice Realtime, Ming TTS, VibeVoice TTS. `MLXAudioCore` Qwen2 gains `includeNorm`, sliding-window and `projectToVocabulary` (defaults unchanged) | `MLXAudioCore/LM/Models/Qwen2.swift` | No (no shipped model uses Core Qwen2) |
-| `7b431f3` (#320) | OuteTTS. `TTS.loadModel` now resolves the folder for `qwen3`/`qwen`/`llama`/`qwen2` types to tell OuteTTS / TADA apart (cache-first). `DescriptDACConfig` decodes HF-published keys. TTS gains a resource bundle (`outetts_default_speaker.json`). | `TTSModel.swift`, `Codecs/Descript/*` | Vyvo (`model_type: qwen3`) goes through the new check and stays `qwen3` (no OuteTTS tokens). Soprano is `soprano`. |
-| `66c3d24` (#326) | Bark. Encodec transposed conv now uses native MLX instead of a scatter loop | `Codecs/Encodec/EncodecLayers.swift` | No (Encodec is used by Bark / Vocos only) |
-| `f3b4829`, `a259232`, `09bea8a`, `3854579`, `1103198`, `7fdb657`, `8b41067`, `2896846`, `548acc8`, `20fef00`, `00b441a`, `84b7490` | New TTS: Higgs Audio v2/v3, rumik-oss, Audio8 (+ hybrid), KugelAudio, Ming-3.0 Tiny, ZONOS2, MeloTTS, TADA, Ming Omni. OmniVoice 8-bit + clone helpers. | new `Models/*` | No (not catalogued, §6) |
-| `34ba52c` (#316) | IndexTTS mel positions | `IndexTTS/*` | No |
-| `d085589` (#345) | Whisper: words lost at the 30 s cuts | `Whisper/*` | No (no Whisper row) |
-| `9dd87cf`, `9762c57` | CI cache, README | | No |
+| `87d0359` (#360), `b13c8ab` (#359) | **Adopt `MaterializedArray` (mlx-swift 0.33.0).** `SpeechGenerationModel.generate/generateStream(refAudio:)` take `MaterializedArray?`. `generate` returns `MaterializedArray`. `AudioGeneration` is `Sendable` and `.audio` carries `MaterializedArray` (with a `.audio(MLXArray)` factory). `loadAudioArray` returns `(Int, MaterializedArray)`. `DiarizationOutput`, `DeepFilterNetStreamingChunk`, `Qwen3TTSReferenceConditioning` and Chatterbox `DefaultConditioning` are now `Sendable` snapshots. **`MLXAudioCore/SendingBox.swift` deleted.** No numeric change. | `MLXAudioCore/*`, `MLXAudioTTS/Generation.swift`, 55 model files, `Sortformer`, `VADOutput` | **Yes, compile break**: fixed in the app (§2). |
+| `7def7fa` (#369) | Qwen3-TTS speech decoder now applies its 72-frame sliding window (`RotatingKVCache` + windowed mask). Before, it attended to the full history. Output changes past about 6 s of audio per call. **[SHIPPED OUTPUT]** | `Qwen3TTS/Qwen3TTSSpeechTokenizer.swift` | Yes: all 4 Qwen3-TTS rows, every voice |
+| `1e9c8ee` (#371) | Qwen3-TTS ICL streaming: the decoder is primed with the last 25 reference codes, so streamed audio starts with the reference as left context (same as non-streaming). Applies to the `conditioning:` path too. **[SHIPPED OUTPUT]** (cloned voices) | `Qwen3TTS/Qwen3TTS.swift`, `Qwen3TTSSpeechTokenizer.swift` | Yes: Qwen3 Base clone builds (`VoiceCloneMLXArtifact.qwen3`), Voice Design anchor |
+| `c8f59b8` (#378) | Qwen3-TTS keeps frames whose first codebook id is 0 when trimming decoded audio. Before, they were cut, which shortened the audio. **[SHIPPED OUTPUT]** | `Qwen3TTS.swift`, `Qwen3TTSSpeechTokenizer.swift` | Yes: all Qwen3-TTS rows |
+| `ff1427a` (#352) | Qwen3-TTS: the speaker-encoder mel now matches the reference (magnitude, Slaney scale, natural log, reflect pad). Also, `refAudio` without `refText` now injects the x-vector instead of being dropped. **[SHIPPED OUTPUT]** for new clone builds: `prepareReferenceConditioning` computes a different `speaker_embedding`. Saved `conditioning.safetensors` keep the old embedding. | `Qwen3TTS.swift`, `Qwen3TTSSpeakerEncoder.swift` | Yes: Voice Clone Qwen3 builds and Voice Design anchors made after the upgrade. The x-vector-only path is not used (the app always passes a transcript). |
+| `200ced1` (#357) | **Mimi transformer: attention is limited to its context window inside a multi-frame call.** Single-step calls keep `context` keys, not `context + 1`. Upstream measured PocketTTS voice-embedding error vs Python going from 31–52 % to about 2e-6 for 5–13 s clips. The dropped first word on cloning is fixed. **[SHIPPED OUTPUT]** | `MLXAudioCodecs/Mimi/Transformer.swift` | Yes: Pocket TTS (clone encode on every chunk, plus decode), Phonon 31m-en (Pocket decode), Marvis (Mimi codec), Qwen3-TTS encoder for references over 10 s |
+| `df2a254` (#368), `b79cfe4` (#367) | Mimi `resetState` also resets the down/upsample convs, so the previous clip's tail no longer leaks into the next. `encodeStep` returns no codes when no frame completes. Marvis throws `invalidRefAudio` for a reference shorter than one Mimi frame. **[SHIPPED OUTPUT]** (Marvis, first frames after a reset) | `Mimi/Mimi.swift`, `Marvis/MarvisTTSModel.swift` | Yes: Marvis default and cloned |
+| `4c363d4` (#363) | `computeMelSpectrogram` drops the last centred STFT frame, like `WhisperFeatureExtractor`. This changes the frame count and the max used by the −8 clamp. **[SHIPPED OUTPUT]** | `MLXAudioCore/DSP.swift` | Yes: Qwen3-ASR, GLM-ASR, Voxtral Realtime (also Qwen3 forced aligner). MOSS-Transcribe-Diarize does not use it. |
+| `cc3b2c0` (#355) | `loadAudioArray` averages the channels to mono instead of keeping channel 0 | `MLXAudioCore/AudioUtils.swift` | `MLXAudioSpeaker.loadReferenceAudio`. App references are mono `reference.wav`, so no change is expected. |
+| `afabf01` (#385) | Chatterbox Turbo keeps T3 in float16 (faster). `prepareInputEmbeddings` is split out. **[SHIPPED OUTPUT]** (numerics) | `Chatterbox/T3/T3GPT2Model.swift` | Yes: `mlx-audio-chatterbox-turbo-4bit` (`dtype: float16`) |
+| `c521abf` (#380), `e845040` (#356) | VoxCPM2 / shared DiT runs bf16 checkpoints in bf16 (masks, RoPE, time embeddings cast). Multi-character Chinese tokens are fed one character at a time. **[SHIPPED OUTPUT]** | `VoxCPM2/MiniCPM.swift`, `VoxCPM2Model.swift`, `VoxCPMDiT.swift` | Yes: `voxcpm2-4bit`, `voxcpm15-4bit` (bf16 non-quantized layers); Chinese text |
+| `1265304` (#384), `011287d` (#351) | Cohere Transcribe runs fp16 checkpoints in fp16. Streamed deltas now continue the text already sent, compared per Unicode scalar, so partial text no longer repeats on multi-byte or combining characters. **[SHIPPED OUTPUT]** (numerics; streamed partials) | `CohereTranscribe/*`, `STT/Shared/Tokenizer.swift` | Yes: `cohere-transcribe-4bit`. `.result` text unchanged except for numerics. |
+| `3b7a255` (#383) | Voxtral Realtime casts float32 weights to the checkpoint's half dtype. **[SHIPPED OUTPUT]** (numerics) | `VoxtralRealtime/VoxtralRealtime.swift` | Yes: `voxtral-realtime-4b-4bit` |
+| `2879cd5` (#377), `1edbcc1` (#358) | Soprano normalizer: decimals read as "N point M", ordinals read as ordinals, and the `\d[KMBT]` rule is word-bounded. **[SHIPPED OUTPUT]** for text with numbers | `Soprano/TextUtils.swift` | Yes: `soprano-1.1-80m-5bit` |
+| `5fd737c` (#365) | GLM-ASR transcribes audio over 30 s in chunks. Before, longer audio was truncated. **[SHIPPED OUTPUT]** (long audio) | `GLMASR/GLMASR.swift` | Yes: `glm-asr-nano-4bit` file transcription |
+| `3736445` (#374) | **Nemotron Unified** (`chunked_limited_with_rc`, buffered streaming, `NemotronASRBufferedEncoder`). `per_feature` normalisation uses valid frames only. A bare language code matches exactly one locale key (`de` → `de-DE`). `NemotronASRStreamSession.init` gains a defaulted `bufferedContext:`. | `NemotronASR/*` | Our row (`normalize: NA`, `chunked_limited`) takes the unchanged cache-aware path. Only the language resolution is new, and `MLXAudioASR` already passes dictionary codes. |
+| `e0de9e7` (#396) | Parakeet: a dense HF `ParakeetForTDT` export is detected by `encoder_config` + `durations` (was `ternary_modules`). Ternary fields are optional. | `Parakeet/ParakeetModel.swift`, `ParakeetRedux.swift` | Routing checked on the mirror configs: `parakeet-redux` still has both keys and stays Redux, while `parakeet-tdt-0.6b-v3` and `Phonon-2` have neither and stay NeMo. No change. |
+| `1c0520e` (#372) | **Maya-2 Native TTS** (Indic + English, Mimi codec + ECAPA speaker encoder from two other repos). `Qwen3Model.callAsFunction(inputEmbeddings:)` is split out (same graph). `EcapaSpeakerEncoder` is public. New resource `maya2_normalization_data.json`. | new `Maya2/*`, `Qwen3/Qwen3.swift`, `Codecs/EcapaTdnn/*`, `TTSModel.swift` | Qwen3.swift: Vyvo (`Qwen3Model`), identical output expected. Maya-2 is not catalogued (§6). |
+| `cf095e0` (#399) | **ZONOS3-Mini TTS** (LM + codec + speaker encoder, single repo) | new `Zonos3/*`, `TTSModel.swift` | No (§6) |
+| `8f371bd` (#366) | `MLXFFT` added to MLXAudioSTT's dependencies | `Package.swift` | Build only. Our fork `thirdparty/mlx-swift` exports `MLXFFT`. |
+| `0dda61b`, `abd0135`, `fb829f5` (#364, #362, #361) | Canary and FireRedASR2 decode long audio in chunks. Canary accepts language names. | `Canary/*`, `FireRedASR2/*` | No (not catalogued) |
+| `163fd1d`, `a699303`, `9d66d6f`, `6a898d6` (#379, #382, #381, #370) | Whisper fp16, MiMo-ASR embedding dtype, Voxtral TTS flow-head dtype, Voxtral TTS 25-frame streaming context | model folders | No |
+| `c758bf2`, `e1b473e` (#354, #353) | Kokoro / StyleTTS2 English G2P: accents folded, numbers read like misaki | `StyleTTS2/G2P/*` | No (the app's Kokoro is sherpa-onnx / Core AI, not MLXAudio) |
+| `9e26c1f`, `3518dd9`, `0e03fee`, `50f2edf`, `8e7bde5`, `4649f92`, `4b9ca01`, `5c4add0`, `927d4e3` | Confucius4 segments + `</s>`, IndexTTS / Zonos2 / MeloTTS / LongCat normalizers, Audio8 Realistic checkpoints, repo-move links | model folders | No |
 
 ---
 
@@ -55,114 +61,155 @@ to watch those.
 
 | Symbol | Change | Our usage / fix |
 |---|---|---|
-| `STTGenerationModel.generateStream` (most models) | Returns at once; inference runs detached. Consumer cancellation cancels it. | `MLXAudioASR.transcribe` / `.bufferUntilStop` iterate with `for try await`, so no code change. Progress now updates per token, and `cancel()` now stops the work (R3). |
-| `STT.loadModel(modelRepo:modelType:hfToken:cache:)` | New defaulted `hfToken:` | `MLXAudioASR.makeSTTModel` uses the 3-arg form (unchanged) |
-| `ModelUtils.resolveModelConfig(repoID:hfToken:cache:)` | New, public; cache-first `mlx-audio/<repo_>/config.json`, else network | Indirect (via `resolveModelType`). Offline when the row is downloaded. |
-| `loadAudioArray(from:sampleRate:)` | Same signature; reads until EOF | `MLXAudioSpeaker.loadReferenceAudio` |
-| `TekkenTokenizer` | Module moved `MLXAudioSTT` → `MLXAudioCore` | Unused by the app |
-| `ModulesConfig.init(numSpeakers:...)`, `SortformerModel.compressSpeakerCache` | New, additive | Unused (`MLXAudioDiarizer` loads via `fromModelDirectory`) |
-| `OmniVoiceModel` voice-cloning helpers (#335) | New | Unused |
-| `TTSModelSource.localDirectory(_, repoHint:, cache:)` | Internal enum gains `cache` | Internal |
+| `SpeechGenerationModel.generate / generateStream / generateSamplesStream(refAudio:)` | `sending MLXArray?` → `MaterializedArray?` | **Broke** `MLXAudioSpeaker.chunkStream` `.reference` case (P5: `MLXAudioSpeaker.swift:574/578` "cannot convert value of type 'MLXArray' to expected argument type 'MaterializedArray'"). **Fix:** `MLXAudioSpeaker.loadReferenceAudio` returns `MaterializedArray?` (what `loadAudioArray` now returns), and `VoiceCloneMLXArtifact.reference(audio:)` holds a `MaterializedArray`. |
+| `Qwen3TTSModel.prepareReferenceConditioning(refAudio:refText:language:)` | `refAudio: MaterializedArray` | **Broke** `VoiceCloneQwen3Builder.encode`. **Fix:** `MLXArray(resampled).materialized()`. Also fixed in the Mac prototype `testcases/audio/prototype/qwen3_voice_consistency/.../Probe.swift`, which is not an app target. |
+| `generate(...)` return, `AudioGeneration.audio` | `MaterializedArray` (an `MLXArray` subclass) | `.asArray(Float.self)` unchanged. No fix needed. |
+| `loadAudioArray(from:sampleRate:)` | Returns `(Int, MaterializedArray)`; averages channels | Via `loadReferenceAudio` (above) |
+| `Qwen3TTSReferenceConditioning` | `Sendable`; stored fields are `MaterializedArray`; `init` still takes `MLXArray` | `readQwen3Conditioning` / `saveQwen3Conditioning` unchanged |
+| `DiarizationOutput` (`speakerProbs: MaterializedArray?`), `DeepFilterNetStreamingChunk` | `Sendable` snapshots | `MLXAudioDiarizer` reads `segments` / `numSpeakers`; `MLXAudioSTS` calls `enhance(MLXArray)`. Unchanged. |
+| `SendingBox` (package-internal) | Deleted | No app reference (grep of `libs/`, `apps/`, `testcases/`, `views/`, `ai/`: none) |
+| `NemotronASRStreamSession.init(..., bufferedContext:)` | New defaulted parameter | `LiveSessionDecoder(nemotron:)`: source-compatible |
+| `EcapaSpeakerEncoder`, `Qwen3Model.callAsFunction(inputEmbeddings:cache:)`, `Qwen3TTSModel.decodeChunk` (now internal, not private) | New / additive | Unused |
 
-No new required parameters on any API the app calls. No sample-rate changes for shipped classes. No new
-`sending` / `Sendable` annotations on the app-facing APIs. `makeSTTStream` wraps the producer in
-`UncheckedSendableBox`, which is internal. No app file imports both an `MLXAudio*` module and
-`MLXLMCommon` / `MLXLLM`; 14 app files import `MLXAudio*`.
+No STT, VAD or STS signature the app calls changed. `STTGenerationModel.generateStream(audio: MLXArray, ...)`
+is unchanged. No app file imports both an `MLXAudio*` module and `MLXLMCommon` / `MLXLLM` / `MLXVLM`. The only
+new top-level public names are `EcapaSpeakerEncoder` and the reshaped `AudioGeneration`, so there is no new
+shared-name ambiguity. A side benefit: the app reuses one reference tensor across every chunk of an
+utterance. Under the old `sending` contract that was technically a reuse-after-transfer. It is now sanctioned.
 
 ---
 
 ## 3. Conflicts and fork patches
 
-No merge conflicts.
-
-| File | Resolution |
+| File | Resolution (P3) |
 |---|---|
-| 12 files byte-identical to upstream (SAMAudioTextEncoder, LFMAudio/Processor, GLMASR, GraniteSpeech, Qwen3ForcedAligner, StreamingInferenceSession, Chatterbox, FishSpeechTokenizer, LlamaTTS, Qwen3, Qwen3TTS, Soprano) + comment-only markers in Qwen3ASR / MarvisTTSModel | **15 markers dropped.** The `Tokenizers.Tokenizer` disambiguation went moot when #287 removed MLXLMCommon. |
-| `Audio8/Audio8Falcon.swift` (**new, merge**) | Bare `compile(shapeless:)` was ambiguous between `MLX.compile` and `MLXAudioCore.compile` → qualified `MLX.compile` (marked 2026-10-30) |
-| `TTSModel.swift` (**new, P8**) | `gradium/phonon-31m-en` config.json switched to `model_type: "gradium_phonon_tts"` on 2026-10-21 (after #288), and upstream has no case for it. Added to `case "pocket_tts", "phonon", "gradium_phonon_tts":` (marked 2026-10-30). Upstream's own `phononGeneratesAudio` smoke test would hit the same throw. Drop the marker when upstream adds the case. |
-| `Phonon2/Phonon2Checkpoint.swift`, `Phonon2Model.swift` (**new, P10**) | #314 treats any config with a `fermion.container_format` block as a Phonon-2.5 container. `mlx-community/Phonon-2` (our row) is plain safetensors whose config keeps that block from its conversion, naming a `model.fermion` the repo never shipped. Result: `requiredExtension "fermion"` made a downloaded Phonon-2 look incomplete, so `resolveOrDownloadModel` **cleared the user's cache** and re-fetched it (regression FAIL "fetches `blobs` from outside the mirror", `audio-20261030-173655`). Fix: `Metadata.isContainer(in:)` counts a fermion-only config as a container only when the container file is present (or no `model.safetensors` is); `prepare` and `fromPretrained` use it. Verified PASS, similarity 0.909 = baseline (`audio-20261030-173930`). Report upstream. |
+| `Audio8/Audio8Falcon.swift` | **Take upstream**, marker dropped. Upstream now writes `MLX.compile(shapeless:)` itself (#359), so the file is byte-identical to upstream. |
+| `Marvis/MarvisTTSModel.swift` | **Take upstream** for `generateStream` (`let task = Task {…}`, `onTermination = { task.cancel() }`). Our 2026-03-21 `generationTask` + `SendingBox` patch is moot: upstream added the same cancel-on-termination and made `refAudio` a Sendable `MaterializedArray`. Kept: FR/DE voices, folder-first Mimi codec, cosF32 filter + `.noUnusedKeys`. |
+| `MossTTSNano/MossTTSNanoModel.swift` | **Keep both.** Upstream still returns stereo and added `.materialized()`. Our stereo-to-mono mix is kept and `.materialized()` is applied to its result (marker 2026-05-04). |
 
-Patch inventory: `116f2eb` 17 files / 21 markers → working tree **6 files / 8 markers**:
-- `ModelUtils` `?? true` (2026-10-24): kept and still load-bearing. Phonon / Pocket pass extra patterns. Upstream left the line alone; it only replaced `resolveModelType` with a `config.json`-only read.
-- Marvis ×3: codec folder-first, cosF32 + `.noUnusedKeys`, named `generationTask`.
-- MossTTSNano ×2: stereo-to-mono, `LocalizedError`.
-- `Audio8Falcon` ×1.
-- `TTSModel` ×1.
+Patch inventory: `d084891` 8 files / 12 markers → working tree **7 files / 10 markers**.
+- Dropped (2): Audio8Falcon ×1, Marvis `generationTask` ×1.
+- Kept, file untouched upstream: `ModelUtils` `?? true` (no manifest = complete), Phonon2Checkpoint ×2,
+  Phonon2Model ×1 (fermion-only config is not a container), MossTTSNano `LocalizedError` ×1.
+- Kept, file changed upstream: `TTSModel.swift` `gradium_phonon_tts` case (upstream still has only
+  `"pocket_tts", "phonon"`), Marvis ×3, MossTTSNano stereo→mono ×1.
 
-`helper/docs/mlx-audio-swift.md` §6 needs its rows updated to match. In particular, all
-`Tokenizers.Tokenizer` rows go. No new offline patch was needed: P3 read every new hub fetch in a shipped
-type, and they are all cache-first. The one TTS addition is `resolveOrDownloadModel` for
-qwen3/llama-typed repos (Vyvo).
+**Offline invariant:** the only new hub fetches are in Maya-2 (`Mimi.fromPretrained(config.codecRepo)` and
+`EcapaSpeakerEncoder.fromPretrained(speakerEncoderRepo)`, two extra repos) and ZONOS3 (`resolveOrDownloadModel`,
+single repo, cache-first). Neither ships. **Adding Maya-2 would need folder-first patches for both, like
+Marvis.** No fetch was added to a shipped model.
+
+`helper/docs/mlx-audio-swift.md` §6: remove the Audio8Falcon and Marvis `generationTask` / `SendingBox` rows,
+and note that MossTTSNano now calls `.materialized()` after the mono mix.
 
 ---
 
 ## 4. Dependencies
 
-- **New: `facebook/zstd` ≥ 1.5.7** (`libzstd`, MLXAudioSTT target), for Phonon-2.5 `.bps.tar.zst`. It is pinned in the app's `Package.resolved` (1.5.7).
-- `MLXFast` product of mlx-swift is now a direct dependency of Core / Codecs / TTS / STT. Our fork `thirdparty/mlx-swift` (0.33.0) exports it.
-- MLXAudioTTS now ships a resource bundle (`MLXAudio_MLXAudioTTS.bundle` with `outetts_default_speaker.json`), so the app embeds one more bundle.
-- Floors unchanged: mlx-swift 0.32.3, swift-transformers 1.1.6, swift-huggingface 0.8.1.
-
-No floor was raised, so there is no dependency move. The macOS app build is green.
-
----
-
-## 5. Risk assessment — 6 risks (0 high, 3 medium, 3 low)
-
-### R1 — Qwen3-TTS audio changes at chunk joins (MEDIUM)
-**Problem:** #350 removes a doubled bias at every streaming chunk join. The app always streams Qwen3-TTS, so every Qwen3 row sounds different (intended: removes a click/offset at joins). #315 changes cloned-voice numerics (bf16 instead of float32 prefill), which is faster and close to, but not bit-equal to, P1. **Verify:** P10 `./run_audio_tests.py --compare /Volumes/ssd2t/modeltests/reports/audio-20261030-164254.json`: the 4 `mlx-audio-qwen3-tts-*` rows pass in default and cloned-voice passes, with the ASR round-trip similarity ≥ P1. **Status:** P10.
-
-### R2 — Phonon 31m-en load needs the fork case (MEDIUM)
-**Problem:** without the `gradium_phonon_tts` case, `TTS.loadModel` throws `unsupportedModelType`. Also check that the new-format config still decodes (`flow_lm` / `mimi` / `conditioners`) and that the `tokenizer.model` vocabulary = `n_bins`. **Verify:** P8 `./run_audio_tests.py --download --only mlx-audio-phonon-31m-en`, then `--only mlx-audio-phonon-31m-en` **Status:** verified 2026-10-30: the row loads as `PocketTTSModel` and passes the default-voice pass (`audio-20261030-172152`). The 31m-en checkpoint omits the speaker encoder ("use a bundled voice embedding"), so the row ships with `supports_voice_cloning: false`.
-
-### R3 — STT streams now run detached and cancellable (MEDIUM)
-**Problem:** #349 moves STT inference off the caller onto a detached task. Before, `generateStream` returned only after the whole transcription. Now:
-- `MLXAudioASR.cancel()` really stops a running job (good).
-- A second `transcribe` on the same `sttModel` while one is in flight would run two generations on one model at once. Before, the stream initializer serialised them.
-- `unloadModel()` → `MLX.Memory.clearCache()` can overlap a producer that has not yet reached its next cancellation check.
-
-The app has no in-flight guard in `MLXAudioASR.transcribe`. Callers today are user-serialised (dictation, file transcribe). **Verify:** P10 STT rows batch + live; one manual check on device: start a long file transcription, cancel, and start another at once. Check for no crash and no doubled text. **Status:** P10 + device.
-
-### R4 — Parakeet-family streamed partials are shorter (LOW)
-**Problem:** #346 holds back the last ~2 s of each chunk until the next chunk. Live partial text in `.bufferUntilStop` now lags but never repeats. The final text is unchanged. **Verify:** P10 `mlx-audio-parakeet-tdt-0.6b-v3`, `mlx-audio-parakeet-redux`, `mlx-audio-phonon-2` batch similarity equals P1. **Status:** P10.
-
-### R5 — SentencePiece scalar lattice (LOW)
-**Problem:** #337 tokenises per Unicode scalar. MOSS-TTS-Nano input with combining marks or emoji may tokenise differently, and SenseVoice / Cohere prompt ids could shift where vocab entries were NFC/NFD aliases. **Verify:** P10 `mlx-audio-moss-tts-nano-100m`, `mlx-audio-sensevoice-small`, `mlx-audio-cohere-transcribe-4bit` pass. **Status:** P10.
-
-### R6 — `loadAudioArray` reads to EOF (LOW)
-**Problem:** clone references longer than one AVFoundation buffer were previously truncated for compressed formats; now they are read in full. App references are `reference.wav` (PCM), so no change is expected. **Verify:** P10 cloned-voice passes (all clone-capable TTS rows) match P1. **Status:** P10.
-
-Shipped classes with **no** source change in this range: PocketTTS, Marvis / Mimi, Chatterbox (defaults
-only), Soprano, MOSS-TTS-Nano model code, Vyvo (`Qwen3Model`), VoxCPM2 (refactor, same graph),
-Qwen3-ASR, Granite / GLM / SenseVoice / Cohere / Voxtral Realtime / Nemotron streaming (stream wrapper
-only), Sortformer (additive), Silero / Smart-Turn VAD, DeepFilterNet STS, MOSS-Transcribe-Diarize.
+- **mlx-swift floor 0.32.3 → 0.33.0** (`MaterializedArray`). Our fork `thirdparty/mlx-swift` is at 0.33.0 and
+  exports `MLXFFT` (`Package.swift:369`). No dependency move was needed (P4).
+- MLXAudioTTS resources gain `Maya2/maya2_normalization_data.json`. It goes into the existing
+  `MLXAudio_MLXAudioTTS.bundle`.
+- Floors unchanged: swift-transformers, swift-huggingface, zstd.
 
 ---
 
-## 6. New models evaluated for the catalogue (2026-10-30)
+## 5. Risk assessment: 7 risks (0 high, 4 medium, 3 low)
 
-Sizes are HF tree sums (HF API, 2026-10-30). Limits: TTS / STS / VAD / diarization ≤ 1000 MB, STT ≤ 700 MB.
+### R1: Qwen3-TTS output changes (MEDIUM)
+**Problem:** #369 (72-frame window) changes every Qwen3 voice past about 6 s per call. #378 keeps frames that
+were trimmed. #371 changes the start of each streamed clone chunk. #357 changes the encoder for references over 10 s.
+All are intended fixes toward the Python reference. **Verify:** P10
+`./run_audio_tests.py --compare /Volumes/ssd2t/modeltests/reports/audio-20261113-163701.json`: the 4
+`mlx-audio-qwen3-tts-*` rows pass default and cloned passes, with ASR similarity ≥ P1. Then a voice sweep of the
+4 Qwen3 rows (§6.2). **Status:** P10.
 
-| Model | Repo size | Decision | Reason |
+### R2: Existing Qwen3 clone builds vs new builds (MEDIUM)
+**Problem:** #352 changed the speaker-encoder mel. A `conditioning.safetensors` built before the upgrade keeps
+its old x-vector and still loads (format unchanged), but a rebuild of the same clip now gives a different,
+reference-faithful embedding. Voice Design anchors work the same way. There is no format break and no
+migration. **Verify:** `VoiceCloneMLXArtifactTests` (round trip). P10 cloned pass for
+`mlx-audio-qwen3-tts-0.6b-4bit` / `1.7b-base-4bit`. On device: one existing Qwen3 build still speaks after the
+update. **Status:** P10 + device.
+
+### R3: Mimi-based TTS output changes (MEDIUM)
+**Problem:** #357 / #368 / #367 change Pocket TTS cloning (it re-encodes the clip through Mimi on every chunk,
+and the first word is no longer dropped), the Pocket / Phonon decode (window `context`, not `context+1`), and
+Marvis (reset leak; a reference under one frame now throws `invalidRefAudio`, which the app surfaces as an
+error). **Verify:** P10 `mlx-audio-pocket-tts` (default + cloned), `mlx-audio-phonon-31m-en`,
+`mlx-audio-marvis-tts-250m-4bit` (default + cloned) pass with similarity ≥ P1, plus a voice sweep of these 3
+rows. **Status:** P10.
+
+### R4: Shared mel frontend (MEDIUM)
+**Problem:** #363 drops one STFT frame and so shifts the −8 dB clamp's max for Qwen3-ASR, GLM-ASR and Voxtral
+Realtime. It matches Python and should not lower accuracy. **Verify:** P10 `mlx-audio-qwen3-asr-0.6b-4bit`,
+`mlx-audio-glm-asr-nano-4bit`, `mlx-audio-voxtral-realtime-4b-4bit` similarity ≥ P1 (0.909 / 1.0 / 1.0).
+**Status:** P10.
+
+### R5: Half-precision numerics (LOW)
+**Problem:** Chatterbox Turbo (#385), VoxCPM2 / 1.5 (#380), Cohere (#384) and Voxtral Realtime (#383) now run in
+the checkpoint's half dtype. They are faster but not bit-equal to P1. **Verify:** P10 the 5 rows pass, with
+cloned passes for Chatterbox and VoxCPM. **Status:** P10.
+
+### R6: `MaterializedArray` evaluates eagerly (LOW)
+**Problem:** every `.audio` chunk and every `refAudio` is now `eval`ed and snapshotted when it is created.
+Streaming latency per chunk could rise slightly, and memory holds one more copy of each reference.
+**Verify:** P10 timings for the TTS rows stay within the usual spread of P1. P5 macOS build and the iOS build
+compile the §2 fix. **Status:** P5 rerun + P10.
+
+### R7: Soprano / GLM-ASR / Cohere behaviour fixes (LOW)
+**Problem:** Soprano reads decimals and ordinals differently (#377, #358). GLM-ASR no longer truncates audio over
+30 s (#365). Cohere partials no longer repeat (#351). All are improvements, but they are user-visible.
+**Verify:** P10 `mlx-audio-soprano-1.1-80m-5bit`, `mlx-audio-glm-asr-nano-4bit`, `mlx-audio-cohere-transcribe-4bit`
+pass. `MLXAudioASRStreamingContractTests`. **Status:** P10.
+
+Carried over, still open from 2026-10-30: STT streams run detached with no in-flight guard in
+`MLXAudioASR.transcribe` (§7).
+
+Shipped classes with **no** output change in this range: Parakeet TDT v3 / Redux / Phonon-2 (routing
+re-checked), Nemotron 3.5 streaming (cache-aware path unchanged), SenseVoice, Granite, MOSS-Transcribe-Diarize,
+Sortformer and DeepFilterNet (`MaterializedArray` only), Silero / Smart-Turn VAD, MOSS-TTS-Nano
+(`.materialized()` only), and Vyvo (`Qwen3Model` refactor, same graph).
+
+---
+
+## 6. New models evaluated for the catalogue (2026-11-13)
+
+Sizes are HF tree sums (HF API, 2026-11-13). Limits: TTS / STS / VAD / diarization ≤ 1000 MB, STT ≤ 700 MB.
+
+| Model | Repo size | Outcome | Reason |
 |---|---|---|---|
-| **Phonon 31m-en** (`gradium/phonon-31m-en`) | 223 MB tree; **≈ 104 MB needed** (`config.json`, `model.safetensors` 102.8 MB, `tokenizer.model` 0.07 MB, `default-voice.safetensors` 0.3 MB) | **Accepted** | TTS, English, Apache-2.0, open (not gated). PocketTTS family, so no new wrapper (`MLXAudioSpeaker`'s Pocket voice branch applies). Needs the §3 fork case. Do not mirror the `*.gguf` files. No voice cloning: the checkpoint has no speaker encoder. |
-| Phonon-2.5 English (`FermionResearch/Phonon-2.5-English`) | 321 MB; needed ≈ 164 MB (`config.json` + `phonon-2.5-en.bps.tar.zst`) | Candidate (verify) | STT, CC-BY-4.0, existing `phonon2` dispatch. **Caveat:** first load extracts into `<models>/mlx-audio/phonon2/<sha>`, a folder outside the row's cache folder, which Settings cannot size or delete. It would need a storage hook first. |
-| Phonon-2.5 (multilingual, `FermionResearch/Phonon-2.5`) | 319 MB | Candidate (verify) | Same as above; `languages` from config |
-| VoxCPM 1.5 4-bit (`mlx-community/VoxCPM1.5-4bit`) | 627 MB | Candidate | TTS, Apache-2.0, voice cloning, `voxcpm` dispatch, generic speaker path. Smaller sibling of the shipped VoxCPM2-4bit (2301 MB). 8-bit is 1028 MB (over). |
-| MeloTTS English (`mlx-community/MeloTTS-English-MLX`) | 646 MB (`bert_weights.npz` 438 + `model.safetensors` 208) | Candidate (verify) | TTS, MIT, preset voices, no cloning. **Its English frontend (`vocab.txt`, `checkpoint20.npz`, `cmudict.zip`, NLTK tagger, `homographs.en`) downloads on first load.** Those files must be mirrored into the row's `frontend/` folder or it fails offline. English only. |
-| OmniVoice 8-bit (`mlx-community/OmniVoice-8bit`) | 1449 MB (bf16 1639 MB, fp 3267 MB) | Rejected | Over 1000 MB |
-| Audio8 TTS Preview 0.1B / 0.6B bf16 (+ hybrid #339) | 1696 / 2565 MB | Rejected | Over 1000 MB, no 4-bit; 0.1B licence "other" |
-| OuteTTS 1.0 0.6B fp16 + DAC codec | 1221 + 296 MB | Rejected | Over 1000 MB |
-| VibeVoice Realtime 0.5B 8-bit | 1221 MB | Rejected | Over 1000 MB |
-| LongCat AudioDiT 1B 4-bit | 1418 MB | Rejected | Over 1000 MB; no licence tag |
-| Bark small (+ Encodec 76 MB) | 1611 MB | Rejected | Over 1000 MB |
-| Nemotron 3.5 Transcribe 30B-A4B 4-bit (`nativ-community/...-EA-4bit`) | 19276 MB | Rejected | Over 700 MB (STT). NVIDIA original 67.5 GB. |
-| Voxtral 4B TTS 4-bit / rumik-oss-1 | 2543 / 7188 MB | Rejected | Over 1000 MB and CC-BY-NC-4.0 |
+| **Nemotron Unified 0.6B 4-bit** (`mlx-community/nemotron-labs-unified-asr-0.6b-4bit`) | **473 MB** (`model.safetensors` 472, `config.json`, `tokenizer.model`, `vocab.txt`) | **Add** | STT, 25 European languages, `model_type: nemotron_asr` (existing dispatch, no new app code). Single repo, no second fetch. Licence OpenMDW-1.1 (permissive, redistribution allowed with the licence file, `LICENSE.md` is in the repo). Not a duplicate: a different base from the shipped Nemotron 3.5 streaming. It streams **buffered** (`chunked_limited_with_rc`): `MLXAudioASR` live mode reaches it through `LiveSessionDecoder` → `NemotronASRStreamSession`, which handles buffered checkpoints. P8 must prove both batch and live. 8-bit (744 MB) is over the limit. |
+| Maya-2 Native (`maya-research/maya2-native`; community `aruntemme/maya2-native-mlx-8bit`) | 5056 MB bf16 / 3326 MB 8-bit; plus `kyutai/mimi` 385 MB and `speechbrain/spkrec-ecapa-voxceleb` 89 MB | **Reject** | Over 1000 MB, with no 4-bit MLX checkpoint. It would also need two folder-first offline patches (Mimi codec, ECAPA encoder). Apache-2.0. |
+| ZONOS3-Mini (`mlx-community/ZONOS3-Mini`, `-swift-ptq`) | 1409 MB / 1276 MB | **Reject** | Over 1000 MB. Apache-2.0. Original `Zyphra/ZONOS3-Mini` is 30.7 GB. |
+| Parakeet Ultra (`moondream/parakeet-ultra`; MLX fp16 `beshkenadze/parakeet-ultra-mlx-fp16`, `selcukkubur/parakeet-ultra-mlx`) | 1257 / 1255 MB | **Reject** | Over 700 MB (STT), with no quantized MLX checkpoint. CC-BY-4.0. Loadable after #396. |
+| Orukeet (`oruk/orukeet`; `itsreidar/orukeet-mlx`) | 11837 / 1255 MB | **Reject** | Over 700 MB. CC-BY-SA-4.0. |
+| Nemotron Unified 8-bit / bf16 | 744 / 1254 MB | **Reject** | Over 700 MB (the 4-bit is added) |
 
-Over the limit, not evaluated further: Confucius4 int8 (2804 MB), Ming-3.0 TTS 0.5B bf16 (3003 MB),
-Ming-3.0 TTS Tiny 4-bit (6663 MB), Ming Omni 16.8B-A3B 4-bit (10104 MB), Higgs Audio v2 3B q6 (4767 MB),
-Higgs TTS 3 4B (9322 MB), ZONOS2 4-bit (4703 MB), TADA 1B (4588 MB, Llama 3.2 licence), VibeVoice 1.5B
-(5408 MB), KugelAudio 0 open (18688 MB).
+Families fixed in this range but already rejected on size on 2026-10-30, still over the limit: Confucius4,
+Audio8 (incl. nativ-community Realistic), Voxtral TTS, IndexTTS, LongCat, MeloTTS (frontend mirroring),
+Canary / FireRedASR2 / Whisper / MiMo-ASR (no rows).
+
+### 6.1 Voices of Add candidates
+Nemotron Unified is STT, so it has no voices.
+
+### 6.2 Voice coverage (§4a): shipped TTS rows the range touched
+`git diff --stat d084891..tag-20261113 -- Sources/MLXAudioTTS Sources/MLXAudioCodecs`: **no voice file, voice
+enum, speaker table or prompt folder changed** (the Marvis `Voice` enum, Qwen3 `spk_id`, Pocket / Phonon voice
+packs and Soprano are all untouched). Model code changed for these rows. Sweep them, because every voice's
+audio moves:
+
+| Row | Why |
+|---|---|
+| `mlx-audio-qwen3-tts-custom-0.6b`, `-0.6b-4bit`, `-1.7b-base-4bit`, `-1.7b-voicedesign-4bit` | #369 / #378 decoder, #371 / #352 clone |
+| `mlx-audio-pocket-tts`, `mlx-audio-phonon-31m-en` | #357 Mimi transformer window |
+| `mlx-audio-marvis-tts-250m-4bit` | #357 / #368 / #367 Mimi |
+| `mlx-audio-chatterbox-turbo-4bit` | #385 fp16 T3 (no voice list; default + clone pass) |
+| `mlx-audio-voxcpm2-4bit`, `mlx-audio-voxcpm15-4bit` | #380 bf16 (no voice list; default + clone pass) |
+| `mlx-audio-soprano-1.1-80m-5bit` | #377 / #358 normalizer only (single voice) |
+
+Not touched beyond `MaterializedArray`: `mlx-audio-vyvo-tts-en-4bit` (Qwen3.swift refactor, same graph),
+`mlx-audio-moss-tts-nano-100m`.
 
 ---
 
@@ -170,19 +217,22 @@ Higgs TTS 3 4B (9322 MB), ZONOS2 4-bit (4703 MB), TADA 1B (4588 MB, Llama 3.2 li
 
 | Upstream feature | Consumer that would use it | Value |
 |---|---|---|
-| Cancellable STT streams (#349) | `MLXAudioASR` | Add an in-flight guard (one generation per model) and await the stream's end on cancel before `unloadModel` clears the cache (R3) |
-| `STTGenerateParameters.task = "translate"` for Nemotron 3.5 Transcribe (#348) | ASR settings | Speech translation to `language`, but no model under the 700 MB limit supports it |
-| VoxCPM 1.5 / MeloTTS / Phonon-2.5 rows | Catalogue (§6) | No new wrapper: all dispatch through `TTS.loadModel` / `STT.loadModel` and the generic speaker / ASR paths. MeloTTS needs frontend mirroring. Phonon-2.5 needs the extraction cache counted in Storage. |
-| OmniVoice voice-cloning helpers (#335) | `VoiceCloneMLXBuilders` | Reusable clone prep if OmniVoice ever fits the size limit |
-| `MLXAudioASR.cacheIgnoringFamilies` | — | Unchanged by this range. The `"voxtral"` substring still routes any Voxtral repo to `VoxtralRealtimeModel`. |
+| Nemotron Unified buffered streaming (#374): `NemotronASRBufferedContext.forLatency` / `bufferedContext:` | `MLXAudioASR` live mode | A latency setting for the new row. Today it uses the model default (320 ms layout). |
+| Nemotron bare-code language match (#374) | `MLXAudioASR` Nemotron language resolver | The app's own name → code mapping could rely on it for `de` → `de-DE`. Keep ours: it also maps English names. |
+| `MaterializedArray` `Sendable` results (#360) | `MLXAudioSpeaker` | The reference tensor and Qwen3 conditioning can be cached across utterances and actors without copies. |
+| Canary language names (#361), long-audio chunking for Canary / FireRed (#364, #362) | ASR catalogue | Only if a Canary / FireRed row under 700 MB appears |
+| STT in-flight guard (open since 2026-10-30) | `MLXAudioASR.transcribe` | One generation per model; await the detached stream on cancel before `unloadModel` clears the cache |
 
 ---
 
 ## 8. Verification
 
-- P1 baseline: `/Volumes/ssd2t/modeltests/reports/audio-20261030-164254.json`, 26 pass / 0 fail / 0 skip.
-- P3: `swift package resolve` rc=0. `swift build` was not run (cold build); the macOS app build covers it.
-- P5: macOS app build (`AIAssistantMac`) green after the `Audio8Falcon` `MLX.compile` qualification.
-- P7: consumer review found no break needing an app change (§2, R3).
-- Done: P8 Phonon row load test (PASS, default voice). Pending: P10 regression `--compare` against the P1 report; `MLXAudioCatalogueSchemaTests`; iOS build.
-- macOS cannot verify: R3 cancel/restart on device, and iOS memory for the new Phonon row.
+- P1 baseline: `/Volumes/ssd2t/modeltests/reports/audio-20261113-163701.json`, 28 pass / 0 fail / 0 skip.
+- P3: conflicts resolved; standalone `swift build` exit 0 (remote mlx-swift).
+- P5: the first macOS app build **failed** on the §2 `MaterializedArray` break (`MLXAudioSpeaker.swift:574/578`).
+  P7 fixed it in `MLXAudioSpeaker.swift` and `VoiceCloneMLXBuilders.swift`. **Pending: rerun the macOS build.**
+- Pending: P10 `--compare` against the P1 report, voice sweep of the §6.2 rows, P8 Nemotron Unified 4-bit
+  (batch + live), `MLXAudioCatalogueSchemaTests`, `MLXAudioVoiceCoverageTests`, `VoiceCloneEngineCatalogTests`,
+  `MLXAudioReferenceAudioTests`, `VoiceCloneMLXArtifactTests`, `VoiceDesignAnchorWiringTests`,
+  `MLXAudioASRStreamingContractTests`, and the iOS build.
+- macOS cannot verify: R2 on device (an existing Qwen3 build after the update), and iOS memory for the new row.
