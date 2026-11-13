@@ -227,12 +227,21 @@ Not touched beyond `MaterializedArray`: `mlx-audio-vyvo-tts-en-4bit` (Qwen3.swif
 
 ## 8. Verification
 
-- P1 baseline: `/Volumes/ssd2t/modeltests/reports/audio-20261113-163701.json`, 28 pass / 0 fail / 0 skip.
-- P3: conflicts resolved; standalone `swift build` exit 0 (remote mlx-swift).
-- P5: the first macOS app build **failed** on the §2 `MaterializedArray` break (`MLXAudioSpeaker.swift:574/578`).
-  P7 fixed it in `MLXAudioSpeaker.swift` and `VoiceCloneMLXBuilders.swift`. **Pending: rerun the macOS build.**
-- Pending: P10 `--compare` against the P1 report, voice sweep of the §6.2 rows, P8 Nemotron Unified 4-bit
-  (batch + live), `MLXAudioCatalogueSchemaTests`, `MLXAudioVoiceCoverageTests`, `VoiceCloneEngineCatalogTests`,
-  `MLXAudioReferenceAudioTests`, `VoiceCloneMLXArtifactTests`, `VoiceDesignAnchorWiringTests`,
-  `MLXAudioASRStreamingContractTests`, and the iOS build.
-- macOS cannot verify: R2 on device (an existing Qwen3 build after the update), and iOS memory for the new row.
+- P1 baseline (macOS test host, slot 9, built against mlx-swift-lm 20261113): **28 passed / 0 failed / 0 skipped of 28** (`audio-20261113-163701`).
+- P5: macOS app build failed once (upstream #360 `MaterializedArray` in `MLXAudioSpeaker` / `VoiceCloneMLXBuilders`); fixed, green.
+- P10 audio sweep: **29 passed / 0 failed / 0 skipped** (`audio-20261113-170754`), no REGRESSED; new row `mlx-audio-nemotron-unified-asr-0.6b-4bit` PASS (similarity 0.909).
+- macOS host suites: `MLXAudioASRStreamingContractTests` first FAILED on the new row (language `English` vs `en`; not live). Fixed in the app
+  (`nemotronPromptKey` maps an English name to its ISO code; `LiveSessionDecoder` accepts upstream's buffered Nemotron branch); re-run: 28 tests,
+  0 failures, the row streams live (final similarity 0.91). `MLXAudioASRLanguageTests`, `MLXAudioVoiceCoverageTests`, `MLXAudioCatalogueSchemaTests` pass.
+  `MLXAudioSTSTests` 2 skips: DeepFilterNet not installed on this Mac (standing).
+- iOS simulator: build + MLXAudioCatalogueSchema, VoiceCoverage, VoiceCloneEngineCatalog, ReferenceAudio, VoiceCloneMLXArtifact, VoiceDesignAnchorWiring,
+  ASRStreamingContract, STS, STTDispatch pass (MLX loads skip on the simulator).
+- Voice sweeps (§4a, `/Volumes/ssd2t/modeltests/voice_sweep/2026-11-13/`): Pocket TTS 8/8, Phonon 31M 38/38, Qwen3 CustomVoice 9/9, Marvis en 2/2,
+  de 1/1, **fr 0/1** (`conversational_fr` 1/3 takes: 0.71, 1.00, 0.80; it passed only at 2/3 on 11-07). `conversational_fr` was dropped from the row
+  and recorded in `MLXAudioVoiceCoverageTests.excluded`; it had not reached prod.
+
+## Catalogue outcome
+- **Added** `mlx-audio-nemotron-unified-asr-0.6b-4bit` (all four tiers, byte-identical; mirror `flyingfishinwater/mlxaudiomodels/nemotron-labs-unified-asr-0.6b-4bit`,
+  commit dd62e5c; licence file `data/license_openmdw_1_1.txt`).
+- Rejected: Maya-2 (3.3-5 GB, no 4-bit, fetches two extra repos), ZONOS3-Mini (1.3-1.4 GB), Parakeet Ultra / Orukeet (~1.25 GB, over the 700 MB ASR limit),
+  Nemotron Unified 8-bit / bf16 (744 / 1254 MB; the 4-bit covers it).
